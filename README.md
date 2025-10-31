@@ -1,5 +1,3 @@
-# globalise-natural-language-search-experiments
-
 # Natural Language Search for VOC Documents
 
 ## What does this notebook do?
