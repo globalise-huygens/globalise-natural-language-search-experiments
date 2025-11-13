@@ -11,22 +11,40 @@ from app_core import (
     search_query,
 )
 
-# Download data files if running on cloud and they don't exist locally
-is_cloud = os.getenv("STREAMLIT_SHARING_MODE") or os.getenv("STREAMLIT_CLOUD")
-if is_cloud:
-    from download_data import ensure_data_files
-    with st.spinner("🔄 Loading data files..."):
-        try:
-            ensure_data_files()
-        except Exception as e:
-            st.error(f"Failed to download data files: {e}")
-            st.stop()
+# --- Ensure required data is present (download + unzip if needed) ---
+# We always run this check on startup. It's fast when files already exist and
+# avoids relying on fragile cloud env vars.
 
-st.set_page_config(
-    page_title="VOC Natural Language Search",
-    page_icon="🔎",
-    layout="wide",
-)
+def _data_ready() -> bool:
+    db_ok = Path("text-metadata-sqlite/voc_documents.db").exists()
+    emb_dir = Path("embeddings")
+    emb_ok = emb_dir.exists() and (any(emb_dir.glob("*.index")) or any(emb_dir.glob("*.db")))
+    return db_ok and emb_ok
+
+@st.cache_resource(show_spinner=False)
+def _prepare_data_once() -> str:
+    """Idempotent, cached data preparation. Returns a short status string."""
+    if _data_ready():
+        return "already-present"
+    try:
+        # Lazy import so local runs without the helper still work
+        from download_data import ensure_data_files
+    except Exception as e:
+        # Surface a clear error if helper is missing in deployments
+        raise RuntimeError(
+            f"Data helper missing: {e}. Ensure 'download_data.ensure_data_files' exists."
+        )
+    ensure_data_files()
+    return "downloaded"
+
+with st.spinner("🔄 Preparing data files (one-time)"):
+    try:
+        status = _prepare_data_once()
+        if status == "downloaded":
+            st.success("Data files downloaded and extracted.")
+    except Exception as e:
+        st.error(f"Failed to prepare data files: {e}")
+        st.stop()
 
 st.set_page_config(
     page_title="VOC Natural Language Search",
