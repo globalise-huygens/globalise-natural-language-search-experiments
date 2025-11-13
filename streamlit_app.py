@@ -11,6 +11,22 @@ from app_core import (
     search_query,
 )
 
+# Download data files if running on cloud and they don't exist locally
+is_cloud = os.getenv("STREAMLIT_SHARING_MODE") or os.getenv("STREAMLIT_CLOUD")
+if is_cloud:
+    from download_data import ensure_data_files
+    with st.spinner("🔄 Loading data files..."):
+        try:
+            ensure_data_files()
+        except Exception as e:
+            st.error(f"Failed to download data files: {e}")
+            st.stop()
+
+st.set_page_config(
+    page_title="VOC Natural Language Search",
+    page_icon="🔎",
+    layout="wide",
+)
 
 st.set_page_config(
     page_title="VOC Natural Language Search",
