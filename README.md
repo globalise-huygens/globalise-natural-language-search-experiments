@@ -1,110 +1,123 @@
-# Natural Language Search for VOC Documents
+# globalise-natural-language-search-experiments
+Repo to collect data and code for natural language search experiments
 
-## What does this notebook do?
+## 🚀 Quick Start
 
-This notebook enables you to search historical VOC documents using **natural language questions** (in Dutch or another language). Instead of needing exact search terms, you can ask questions like *"what was life like for enslaved people"* and get the most relevant text fragments in return.
+### Local Development
 
-## Setup
+1. Create and activate a Python 3.10+ environment.
+2. Install dependencies:
 
-### Prerequisites
-Before running the notebook, you need to:
-
-1. **Create a `.env` file** in the same directory as the notebook with your OpenAI API key:
-   ```
-   OPENAI_API_KEY=your-api-key-here
-   ```
-
-2. **Run Cell 1** to load the API key from the environment file and load/install all dependencies.
-   
-## Step-by-step explanation
-
-### 1. **Load documents** (Cell 2)
-- The notebook reads all CSV files from the `text-input` folder
-- Each file contains transcribed text from pages of one inventory number
-- All texts are combined into one large table
-
-### 2. **Clean text** (Cell 3)
-- Strange characters are replaced (like â€ž → ")
-- Extra whitespace is removed
-- This ensures more consistent search results
-
-### 3. **Split text into 'chunks'** (Cell 4)
-- Each document is divided into pieces of **500 words**
-- These pieces overlap by **100 words**
-- Why? Because the search technology works better with smaller, manageable text fragments
-- **Important**: Chunks continue across page boundaries so you don't lose context
-
-### 4. **Store in database** (Cell 6)
-- All chunks are saved in a SQLite database (`voc_documents.db`)
-- For each chunk, we track:
-  - Which inventory number it belongs to
-  - Which page(s) the text appears on
-  - The full text of the fragment
-
-### 5. **Create embeddings** (Cell 7)
-- This is the 'smart' part: each chunk is converted into a numerical representation (an 'embedding')
-- These embeddings capture the **meaning** of the text
-- They are stored in a FAISS index (a type of efficient search index)
-- This happens automatically the first time you search in an inventory number
-- After that, the embeddings are reused (much faster!)
-
-### 6. **Search** (Cell 8-9)
-When you submit a search query:
-
-1. **Your question becomes an embedding**: The search query gets the same numerical representation
-2. **Compare**: The system finds which chunks are most similar to your question (semantically similar, not literal matches)
-3. **Sort results**: The most relevant fragments appear at the top
-4. **Add explanations**: For the top 5 results, the system generates a brief explanation of why this fragment is relevant
-5. **Save**: Results are saved as CSV in the `results` folder
-
-## What do you get back?
-
-A table with:
-- **inv_nr**: The inventory number
-- **start_page**: The first page of the fragment
-- **pages**: All pages included in this fragment
-- **similarity**: How relevant the fragment is (higher = more relevant)
-- **verantwoording**: Why this fragment is relevant to your question
-- **text**: The complete text of the fragment
-
-## How to use it?
-
-In the last cell, modify:
-
-```python
-query_text = "your question here"
-df_results = search_query(query_text, inv_nrs=["1120", "1267"], verantwoording_top=5)
+```bash
+pip install -r requirements.txt
 ```
 
-- **query_text**: Your search question in plain language
-- **inv_nrs**: List of inventory numbers you want to search in (make sure the text of these inventory numbers is included in csv file format in the text-input folder).
-- **verantwoording_top**: How many results you want explanations for (default 5)
+3. Provide an OpenAI API key, either via a `.env` file or environment variable:
 
-## Important notes
+```bash
+OPENAI_API_KEY=your_key_here
+```
 
-- **First time is slow**: The first time you search in an inventory number, it takes longer because embeddings are being created. After that, it's much faster!
-- **API costs**: The system uses OpenAI's API, which costs money per search query (a few cents per question)
-- **Results in CSV**: Always check the `results` folder for detailed results
+4. Run the Streamlit app:
 
-## Tips for good search results
+```bash
+streamlit run streamlit_app.py
+```
 
-**Do:**
-- Ask concrete questions: "How was coffee transported?"
-- Use thematic search queries: "life aboard VOC ships"
-- Search for concepts: "trade conflicts with the English"
+### Streamlit Cloud Deployment
 
-**Don't:**
-- Search for exact quotes (use Ctrl+F for that)
-- Ask overly broad questions: "tell me about the VOC"
-- Expect modern terminology in historical texts
+See [DEPLOYMENT.md](DEPLOYMENT.md) for complete instructions on deploying to Streamlit Cloud with precomputed embeddings for team use.
 
-## Chunk sizes explained
+**Quick summary:**
+1. Run `python precompute_embeddings.py` locally to generate all embeddings
+2. Commit `embeddings/` and `text-metadata-sqlite/` to git
+3. Deploy to Streamlit Cloud (no secrets needed - users provide their own API keys)
 
-The notebook uses **word-based chunking**:
-- `CHUNK_SIZE = 500` means 500 words per chunk
-- `CHUNK_OVERLAP = 100` means 100 words overlap between consecutive chunks
+## 📖 Streamlit App
 
-These are **words** (whitespace-delimited), not tokens or characters:
-- 5000 words ≈ ~666 tokens ≈ ~3,500 characters
+This repo includes a Streamlit app to explore natural-language search across VOC documents using OpenAI embeddings and FAISS.
 
-This stays well within OpenAI's embedding model limit of 8,191 tokens.
+### Features
+
+- 🔍 **Semantic search** across historical Dutch VOC documents
+- 🌍 **Multi-language queries** (auto-translated to modern Dutch)
+- 🤖 **AI-powered justifications** explaining why each result is relevant
+- 📊 **Interactive results** with similarity scores and downloadable CSVs
+- 🔒 **Secure API key handling** (session-only, never persisted)
+- 💾 **Precomputed embeddings** for fast shared team access
+
+### How It Works
+
+1. **Data preparation**: CSV files from `text-input/` are chunked with overlap across page boundaries
+2. **Storage**: Chunks and metadata stored in SQLite (`text-metadata-sqlite/voc_documents.db`)
+3. **Embeddings**: FAISS indexes created per inventory number using OpenAI `text-embedding-3-large`
+4. **Search**: User queries are translated to Dutch, embedded, and matched against FAISS indexes
+5. **Ranking**: Results ranked by cosine similarity; optional AI justifications generated
+
+### Usage
+
+### Usage
+
+**Local mode:**
+- Rebuild database from `text-input/` CSVs with custom chunking parameters
+- Generate embeddings on-demand for new inventory numbers
+- Full read/write access
+
+**Streamlit Cloud mode:**
+- Read-only: uses precomputed database and embeddings
+- Each user provides their own OpenAI API key (session-only)
+- Fast shared access for teams
+
+### Data Directories
+
+- `text-input/` — Source CSV files (filename, text columns) per inventory number
+- `text-metadata-sqlite/` — SQLite database with chunks and metadata (~96MB)
+- `embeddings/` — FAISS indexes per inventory number (~109MB)
+- `results/` — User-generated search results (not committed to git)
+
+## 🏗️ Project Structure
+
+```
+├── streamlit_app.py          # Main Streamlit UI
+├── app_core.py               # Core logic (chunking, embeddings, search)
+├── precompute_embeddings.py  # Helper to generate all embeddings
+├── requirements.txt          # Python dependencies
+├── DEPLOYMENT.md            # Streamlit Cloud deployment guide
+└── .streamlit/config.toml   # Streamlit configuration
+```
+
+## 📚 Notebook
+
+The original research notebook `natural-language-search.ipynb` contains exploratory analysis and the prototyping work that led to the Streamlit app.
+
+## 🔐 Security Notes
+
+- **API keys**: Never committed; stored only in browser session memory
+- **Data**: Historic documents and embeddings are committed (public repo)
+- **Results**: User CSV outputs excluded from git via `.gitignore`
+
+## 📊 Models Used
+
+- **Embeddings**: `text-embedding-3-large` (3072 dimensions)
+- **Translation & Justifications**: `gpt-4o-mini`
+
+## 🤝 Contributing
+
+To add new inventory numbers:
+
+1. Add CSV file to `text-input/{inv_nr}.csv` with columns: `filename`, `text`
+2. Locally run `python precompute_embeddings.py`
+3. Commit updated `embeddings/` and `text-metadata-sqlite/`
+4. Push to trigger automatic Streamlit Cloud redeployment
+
+## 📝 License
+
+[Add your license here]
+
+## 👥 Team
+
+[Add your team/project information here]
+
+---
+
+For deployment instructions, see [DEPLOYMENT.md](DEPLOYMENT.md)
