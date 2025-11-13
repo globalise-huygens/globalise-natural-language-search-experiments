@@ -60,9 +60,10 @@ st.title("🔎 VOC Natural Language Search Explorer")
 st.markdown(
     """
     Interactive search in historical VOC documents using OpenAI embeddings and semantic matching.
-    - Build the database from source files first.
-    - Generate embeddings (one-time) per inventory number.
-    - Then perform a search query; the query can be auto-translated to modern Dutch.
+    - Uses a pre-built database with 20 inventory numbers.
+    - Uses pre-generated embeddings on 300-word chunks (with 50-word overlap) per inventory number. The chunks can cross scan borders, but not document borders.
+    - Any search query can be entered; select the box 'Query in language other than Dutch' to auto-translate the query to modern Dutch.
+    - For different settings (e.g. chunk size, overlap), run the app locally and rebuild the database.
     """
 )
 
@@ -90,9 +91,8 @@ with st.sidebar:
     if not is_cloud:
         st.markdown("---")
         st.subheader("🔧 Database options (local only)")
-        st.info("💡 **Note:** To use the new metadata filters (Place, Establishment, etc.), you need to rebuild the database from the `text_input_metadata` folder.")
         build_db = st.checkbox("Rebuild database", value=False, help="Reads all CSVs and reconstructs chunks.")
-        apply_norm = st.checkbox("Normalize spelling", value=True)
+        apply_norm = st.checkbox("Normalize spelling", value=False)
         chunk_size = st.number_input("Chunk size (words)", min_value=100, max_value=2000, value=300, step=50)
         overlap = st.number_input("Overlap (words)", min_value=0, max_value=500, value=75, step=10)
     else:
@@ -106,7 +106,7 @@ with st.sidebar:
     st.subheader("🔍 Search options")
 
     inv_options = list_available_inv_nrs()
-    selected_inv_nrs = st.multiselect("Inventory numbers", inv_options, default=inv_options[:5] if len(inv_options) > 0 else [])
+    selected_inv_nrs = st.multiselect("Inventory numbers", inv_options, default=inv_options[:20] if len(inv_options) > 0 else [])
 
     top_k = st.number_input("Top K results per inventory number", min_value=1, max_value=2000, value=25)
 
