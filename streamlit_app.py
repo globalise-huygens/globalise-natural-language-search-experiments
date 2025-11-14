@@ -112,46 +112,40 @@ with st.sidebar:
     st.subheader("🔧 Database options (local only)")
     
     if is_cloud:
-        # Show disabled controls in cloud with visual indication
-        st.markdown(
-            '<div style="opacity: 0.5; pointer-events: none;">',
-            unsafe_allow_html=True
+        # In cloud: show info message only, no controls
+        st.info("📌 Database and embeddings are pre-computed. Database rebuild options are only available when running locally.")
+        build_db = False
+        apply_norm = True
+        chunk_size = 300
+        overlap = 75
+    else:
+        # Local development: show interactive controls
+        build_db = st.checkbox(
+            "Rebuild database", 
+            value=False, 
+            help="Reads all CSVs and reconstructs chunks."
         )
-    
-    build_db = st.checkbox(
-        "Rebuild database", 
-        value=False, 
-        disabled=is_cloud,
-        help="Reads all CSVs and reconstructs chunks. (Disabled in cloud deployment)"
-    )
-    apply_norm = st.checkbox(
-        "Normalize spelling", 
-        value=False if not is_cloud else True,
-        disabled=is_cloud,
-        help="Apply text normalization. (Disabled in cloud deployment)"
-    )
-    chunk_size = st.number_input(
-        "Chunk size (words)", 
-        min_value=100, 
-        max_value=2000, 
-        value=300, 
-        step=50,
-        disabled=is_cloud,
-        help="Number of words per chunk. (Disabled in cloud deployment)"
-    )
-    overlap = st.number_input(
-        "Overlap (words)", 
-        min_value=0, 
-        max_value=500, 
-        value=75, 
-        step=10,
-        disabled=is_cloud,
-        help="Word overlap between chunks. (Disabled in cloud deployment)"
-    )
-    
-    if is_cloud:
-        st.markdown('</div>', unsafe_allow_html=True)
-        st.info("📌 Database and embeddings are pre-computed. Only search is available.")
+        apply_norm = st.checkbox(
+            "Normalize spelling", 
+            value=False,
+            help="Apply text normalization."
+        )
+        chunk_size = st.number_input(
+            "Chunk size (words)", 
+            min_value=100, 
+            max_value=2000, 
+            value=300, 
+            step=50,
+            help="Number of words per chunk."
+        )
+        overlap = st.number_input(
+            "Overlap (words)", 
+            min_value=0, 
+            max_value=500, 
+            value=75, 
+            step=10,
+            help="Word overlap between chunks."
+        )
     
     st.markdown("---")
     st.subheader("🔍 Search options")
