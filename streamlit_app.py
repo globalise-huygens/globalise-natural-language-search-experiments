@@ -198,6 +198,28 @@ with st.sidebar:
         step=0.01,
         help="Only show results with similarity score above this threshold (0-1 scale)"
     )
+    
+    # --- Result quality options ---
+    st.markdown("---")
+    st.subheader("📏 Result quality options")
+    
+    min_chunk_length = st.number_input(
+        "Minimum chunk length (words)",
+        min_value=0,
+        max_value=300,
+        value=100,
+        step=25,
+        help="Filter out chunks shorter than this. Helps remove short fragments that may score artificially high."
+    )
+    
+    apply_length_adjustment = st.checkbox(
+        "Apply length-aware scoring",
+        value=True,
+        help="Boost longer chunks to balance semantic similarity with content richness. Reduces bias toward short, overly-focused chunks."
+    )
+    
+    if apply_length_adjustment:
+        st.caption("ℹ️ Length adjustment applies a gentle boost to longer chunks (up to target length of 300 words) to counteract the tendency of short chunks to score artificially high in semantic similarity.")
 
     st.markdown("---")
     st.caption("Database path: text-metadata-sqlite/voc_documents.db")
@@ -236,18 +258,52 @@ if run_search:
                     translate_if_not_dutch=translate_query,
                 )
                 
-                # Apply similarity threshold filter
-                df_results = df_results[df_results['similarity'] >= min_similarity]
+                # Calculate word counts
+                df_results['word_count'] = df_results['text'].str.split().str.len()
                 
-                # Apply overall top-K ranking if selected
-                if top_k_mode == "Overall (across all inventories)" and top_k_overall:
-                    df_results = df_results.nlargest(int(top_k_overall), 'similarity')
+                # Apply minimum length filter
+                original_count = len(df_results)
+                df_results = df_results[df_results['word_count'] >= min_chunk_length]
+                filtered_count = original_count - len(df_results)
+                
+                if filtered_count > 0:
+                    st.info(f"ℹ️ Filtered out {filtered_count} chunks shorter than {min_chunk_length} words.")
+                
+                # Apply length-aware scoring if enabled
+                if apply_length_adjustment:
+                    # Calculate adjusted similarity with gentle length boost
+                    # Formula: adjusted = raw_similarity * (0.7 + 0.3 * min(word_count/300, 1.0))
+                    # This gives a 0.7x-1.0x multiplier based on length
+                    df_results['length_factor'] = 0.7 + 0.3 * df_results['word_count'].apply(lambda x: min(x / 300, 1.0))
+                    df_results['adjusted_similarity'] = df_results['similarity'] * df_results['length_factor']
+                    
+                    # Sort by adjusted similarity
+                    df_results = df_results.sort_values('adjusted_similarity', ascending=False)
+                    
+                    # Use adjusted similarity for threshold filtering
+                    df_results = df_results[df_results['adjusted_similarity'] >= min_similarity]
+                    
+                    # Apply overall top-K ranking if selected (using adjusted similarity)
+                    if top_k_mode == "Overall (across all inventories)" and top_k_overall:
+                        df_results = df_results.nlargest(int(top_k_overall), 'adjusted_similarity')
+                    
+                    # Keep original similarity for reference, use adjusted as primary
+                    df_results['similarity_raw'] = df_results['similarity']
+                    df_results['similarity'] = df_results['adjusted_similarity']
+                else:
+                    # Original behavior: use raw similarity
+                    df_results = df_results[df_results['similarity'] >= min_similarity]
+                    
+                    # Apply overall top-K ranking if selected
+                    if top_k_mode == "Overall (across all inventories)" and top_k_overall:
+                        df_results = df_results.nlargest(int(top_k_overall), 'similarity')
                 
                 # Store results in session state
                 st.session_state['search_results'] = df_results
                 st.session_state['query_text'] = query_text
                 st.session_state['min_similarity'] = min_similarity
                 st.session_state['top_k_mode'] = top_k_mode
+                st.session_state['apply_length_adjustment'] = apply_length_adjustment
                 
                 # Show message if no results meet the threshold
                 if df_results.empty:
@@ -267,12 +323,24 @@ if 'search_results' in st.session_state and not st.session_state['search_results
     # Get search parameters from session
     applied_threshold = st.session_state.get('min_similarity', 0.0)
     applied_mode = st.session_state.get('top_k_mode', 'Per inventory number')
+    length_adjusted = st.session_state.get('apply_length_adjustment', False)
     
     # Show search info
+    info_text = f"{len(df_results)} results found"
     if applied_mode == "Overall (across all inventories)":
-        st.success(f"{len(df_results)} top results (overall ranking, similarity ≥ {applied_threshold:.2f})")
+        info_text = f"{len(df_results)} top results (overall ranking"
     else:
-        st.success(f"{len(df_results)} results found (top K per inventory, similarity ≥ {applied_threshold:.2f})")
+        info_text += " (top K per inventory"
+    
+    if length_adjusted:
+        info_text += f", length-adjusted similarity ≥ {applied_threshold:.2f})"
+    else:
+        info_text += f", similarity ≥ {applied_threshold:.2f})"
+    
+    st.success(info_text)
+    
+    if length_adjusted:
+        st.info("ℹ️ **Length-aware scoring enabled**: Longer chunks receive a boost (up to 1.0x for 300+ words, 0.7x for very short) to balance semantic match with content richness.")
     
     # Get filter options from actual results
     years_available = df_results['jaar_int'].dropna().astype(int)
@@ -425,9 +493,20 @@ if 'search_results' in st.session_state and not st.session_state['search_results
                 pages_list = str(row['pages']).split(';') if pd.notna(row['pages']) and row['pages'] else [row['start_page']]
                 pages_display = ", ".join(pages_list) if len(pages_list) > 1 else pages_list[0]
                 
-                with st.expander(
-                    f"**{idx + 1}.** Inv. no. {row['inv_nr']} | {row['start_page']} | Similarity: {row['similarity']:.3f} | {row['datum']} | {row['plaats']}"
-                ):
+                # Build header with similarity info
+                header = f"**{idx + 1}.** Inv. no. {row['inv_nr']} | {row['start_page']} | Similarity: {row['similarity']:.3f}"
+                
+                # Add word count if available
+                if 'word_count' in row and pd.notna(row['word_count']):
+                    header += f" | {int(row['word_count'])} words"
+                
+                # Add raw similarity if length adjustment was applied
+                if length_adjusted and 'similarity_raw' in row and pd.notna(row['similarity_raw']):
+                    header += f" (raw: {row['similarity_raw']:.3f})"
+                
+                header += f" | {row['datum']} | {row['plaats']}"
+                
+                with st.expander(header):
                     col1, col2 = st.columns([3, 1])
                     
                     with col1:
@@ -439,6 +518,10 @@ if 'search_results' in st.session_state and not st.session_state['search_results
                         st.markdown(f"**Date:** {row['datum']}")
                         st.markdown(f"**Pages:** {pages_display}")
                         
+                        # Show word count prominently
+                        if 'word_count' in row and pd.notna(row['word_count']):
+                            st.markdown(f"**Chunk length:** {int(row['word_count'])} words")
+                        
                         st.markdown("**Full text chunk:**")
                         st.text(row['text'])
                     
@@ -448,20 +531,38 @@ if 'search_results' in st.session_state and not st.session_state['search_results
 
             # Expand raw table
             with st.expander("📊 Full results table", expanded=False):
+                # Build columns list dynamically based on what's available
+                base_columns = [
+                    "inv_nr",
+                    "tanap_id",
+                    "similarity",
+                ]
+                
+                # Add word_count if available
+                if 'word_count' in df_display.columns:
+                    base_columns.append("word_count")
+                
+                # Add raw similarity if length adjustment was applied
+                if length_adjusted and 'similarity_raw' in df_display.columns:
+                    base_columns.append("similarity_raw")
+                
+                # Add remaining columns
+                base_columns.extend([
+                    "datum",
+                    "jaar",
+                    "plaats",
+                    "vestiging",
+                    "doc_category",
+                    "pages",
+                    "transcription_url",
+                    "text",
+                ])
+                
+                # Only include columns that exist in the dataframe
+                display_columns = [col for col in base_columns if col in df_display.columns]
+                
                 st.dataframe(
-                    df_display[[
-                        "inv_nr",
-                        "tanap_id",
-                        "similarity",
-                        "datum",
-                        "jaar",
-                        "plaats",
-                        "vestiging",
-                        "doc_category",
-                        "pages",
-                        "transcription_url",
-                        "text",
-                    ]],
+                    df_display[display_columns],
                     width='stretch',
                 )
 
