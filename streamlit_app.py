@@ -60,10 +60,30 @@ st.title("🔎 VOC Natural Language Search Explorer")
 st.markdown(
     """
     Interactive search in historical VOC documents using OpenAI embeddings and semantic matching.
-    - Uses a pre-built database with 20 inventory numbers.
-    - Uses pre-generated embeddings on 300-word chunks (with 50-word overlap) per inventory number. The chunks can cross scan borders, but not document borders.
-    - Any search query can be entered; select the box 'Query in language other than Dutch' to auto-translate the query to modern Dutch.
-    - For different settings (e.g. chunk size, overlap), run the app locally and rebuild the database.
+    
+    **Data & Storage:**
+    - The app uses precomputed embeddings for 20 inventory numbers, automatically downloaded from cloud storage on first run
+    - Data is cached locally in `text-metadata-sqlite/` (database) and `embeddings/` (FAISS indexes)
+    - Total data size: approximately 200MB
+    
+    **API Key & Costs:**
+    - An OpenAI API key is required (enter in sidebar - stored only in your browser session, never on servers)
+    - Each search query costs approximately $0.0002 (one embedding generation per query)
+    - Optional translation (for non-Dutch queries) adds minimal cost (~$0.0001)
+    - Precomputed document embeddings are reused, so they don't incur costs per query
+    
+    **Search Features:**
+    - 300-word chunks with 75-word overlap across 20 inventory numbers
+    - Chunks respect document boundaries (TANAP IDs) but can cross scan boundaries
+    - Metadata (year, place, establishment, document category) enriches chunks and enables filtering
+    - Multi-language queries supported with automatic translation to modern Dutch
+    - Flexible result ranking: top K per inventory or top K overall across all inventories
+    - Similarity threshold filtering to control result quality
+    
+    **Methodology:**
+    - Text chunks are enriched with metadata building on [Renate Smit's work](https://github.com/globalise-huygens/Inventorization-and-Metadata)
+    - For detailed methodology and technical documentation, see the [GitHub repository](https://github.com/globalise-huygens/globalise-natural-language-search-experiments/tree/streamlit)
+    - For different settings (chunk size, overlap), run the app locally, rebuild the database and re-generate embeddings (note: this requires API key and incurs costs)
     """
 )
 
@@ -88,18 +108,49 @@ with st.sidebar:
     # Only allow DB rebuild in local development (not on Streamlit Cloud)
     is_cloud = os.getenv("STREAMLIT_SHARING_MODE") or os.getenv("STREAMLIT_CLOUD")
     
-    if not is_cloud:
-        st.markdown("---")
-        st.subheader("🔧 Database options (local only)")
-        build_db = st.checkbox("Rebuild database", value=False, help="Reads all CSVs and reconstructs chunks.")
-        apply_norm = st.checkbox("Normalize spelling", value=False)
-        chunk_size = st.number_input("Chunk size (words)", min_value=100, max_value=2000, value=300, step=50)
-        overlap = st.number_input("Overlap (words)", min_value=0, max_value=500, value=75, step=10)
-    else:
-        build_db = False
-        apply_norm = True
-        chunk_size = 300
-        overlap = 75
+    st.markdown("---")
+    st.subheader("🔧 Database options (local only)")
+    
+    if is_cloud:
+        # Show disabled controls in cloud with visual indication
+        st.markdown(
+            '<div style="opacity: 0.5; pointer-events: none;">',
+            unsafe_allow_html=True
+        )
+    
+    build_db = st.checkbox(
+        "Rebuild database", 
+        value=False, 
+        disabled=is_cloud,
+        help="Reads all CSVs and reconstructs chunks. (Disabled in cloud deployment)"
+    )
+    apply_norm = st.checkbox(
+        "Normalize spelling", 
+        value=False if not is_cloud else True,
+        disabled=is_cloud,
+        help="Apply text normalization. (Disabled in cloud deployment)"
+    )
+    chunk_size = st.number_input(
+        "Chunk size (words)", 
+        min_value=100, 
+        max_value=2000, 
+        value=300, 
+        step=50,
+        disabled=is_cloud,
+        help="Number of words per chunk. (Disabled in cloud deployment)"
+    )
+    overlap = st.number_input(
+        "Overlap (words)", 
+        min_value=0, 
+        max_value=500, 
+        value=75, 
+        step=10,
+        disabled=is_cloud,
+        help="Word overlap between chunks. (Disabled in cloud deployment)"
+    )
+    
+    if is_cloud:
+        st.markdown('</div>', unsafe_allow_html=True)
         st.info("📌 Database and embeddings are pre-computed. Only search is available.")
     
     st.markdown("---")
@@ -108,7 +159,29 @@ with st.sidebar:
     inv_options = list_available_inv_nrs()
     selected_inv_nrs = st.multiselect("Inventory numbers", inv_options, default=inv_options[:20] if len(inv_options) > 0 else [])
 
-    top_k = st.number_input("Top K results per inventory number", min_value=1, max_value=2000, value=25)
+    # Top-K mode selection
+    top_k_mode = st.radio(
+        "Result ranking mode",
+        options=["Per inventory number", "Overall (across all inventories)"],
+        help="Choose whether to get top K results from each inventory separately, or top K results overall ranked by similarity."
+    )
+    
+    if top_k_mode == "Per inventory number":
+        top_k = st.number_input("Top K results per inventory number", min_value=1, max_value=2000, value=25)
+        top_k_overall = None
+    else:
+        top_k = st.number_input("Top K results per inventory number (before overall ranking)", min_value=1, max_value=2000, value=100, help="Fetch this many from each inventory, then rank and limit overall")
+        top_k_overall = st.number_input("Top K results overall", min_value=1, max_value=2000, value=50)
+    
+    # Similarity threshold
+    min_similarity = st.number_input(
+        "Minimum similarity threshold",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.45,
+        step=0.05,
+        help="Only show results with similarity score above this threshold (0-1 scale)"
+    )
 
     st.markdown("---")
     st.caption("Database path: text-metadata-sqlite/voc_documents.db")
@@ -161,9 +234,19 @@ if run_search:
                     top_k=int(top_k),
                     translate_if_not_dutch=translate_query,
                 )
+                
+                # Apply similarity threshold filter
+                df_results = df_results[df_results['similarity'] >= min_similarity]
+                
+                # Apply overall top-K ranking if selected
+                if top_k_mode == "Overall (across all inventories)" and top_k_overall:
+                    df_results = df_results.nlargest(int(top_k_overall), 'similarity')
+                
                 # Store results in session state
                 st.session_state['search_results'] = df_results
                 st.session_state['query_text'] = query_text
+                st.session_state['min_similarity'] = min_similarity
+                st.session_state['top_k_mode'] = top_k_mode
             except Exception as e:
                 st.error(f"Search failed: {e}")
                 st.code(traceback.format_exc())
@@ -173,7 +256,15 @@ if run_search:
 if 'search_results' in st.session_state and not st.session_state['search_results'].empty:
     df_results = st.session_state['search_results']
     
-    st.success(f"{len(df_results)} results found across {len(selected_inv_nrs)} inventory numbers.")
+    # Get search parameters from session
+    applied_threshold = st.session_state.get('min_similarity', 0.0)
+    applied_mode = st.session_state.get('top_k_mode', 'Per inventory number')
+    
+    # Show search info
+    if applied_mode == "Overall (across all inventories)":
+        st.success(f"{len(df_results)} top results (overall ranking, similarity ≥ {applied_threshold:.2f})")
+    else:
+        st.success(f"{len(df_results)} results found (top K per inventory, similarity ≥ {applied_threshold:.2f})")
     
     # Get filter options from actual results
     years_available = df_results['jaar_int'].dropna().astype(int)
