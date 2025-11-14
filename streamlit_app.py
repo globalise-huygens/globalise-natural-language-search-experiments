@@ -103,7 +103,7 @@ translate_query = st.checkbox(
 
 query_text = st.text_input(
     "Enter your search query (any language)",
-    placeholder="E.g. abuse of power by the VOC, consequences of volcanic eruptions, living conditions in Batavia, ...",
+    placeholder="E.g. abuse of power by the VOC, consequences of volcanic eruptions, living conditions of enslaved persons, ...",
 )
 
 run_search = st.button("Search", type="primary")
