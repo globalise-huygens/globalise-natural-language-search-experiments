@@ -56,7 +56,7 @@ st.set_page_config(
 if 'api_key' not in st.session_state:
     st.session_state.api_key = ""
 
-st.title("🔎 VOC Natural Language Search Explorer")
+st.title("VOC Natural Language Search Explorer")
 
 # Show intro text in an expander - collapsed if results are present
 has_results = 'search_results' in st.session_state and not st.session_state.get('search_results', pd.DataFrame()).empty
@@ -92,7 +92,7 @@ with st.expander("ℹ️ About this tool", expanded=not has_results):
     )
 
 # Search interface - prominent at the top
-st.markdown("## 🔍 Search Query")
+st.markdown("## Search")
 
 # Translation option
 translate_query = st.checkbox(
@@ -103,7 +103,7 @@ translate_query = st.checkbox(
 
 query_text = st.text_input(
     "Enter your search query (any language)",
-    placeholder="E.g. events around a specific place...",
+    placeholder="E.g. abuse of power by the VOC, consequences of volcanic eruptions, living conditions in Batavia, ...",
 )
 
 run_search = st.button("Search", type="primary")
