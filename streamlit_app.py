@@ -173,7 +173,7 @@ with st.sidebar:
         min_value=0.0,
         max_value=1.0,
         value=0.45,
-        step=0.05,
+        step=0.01,
         help="Only show results with similarity score above this threshold (0-1 scale)"
     )
 
