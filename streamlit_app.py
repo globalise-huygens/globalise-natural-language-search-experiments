@@ -57,36 +57,58 @@ if 'api_key' not in st.session_state:
     st.session_state.api_key = ""
 
 st.title("🔎 VOC Natural Language Search Explorer")
-st.markdown(
-    """
-    Interactive search in historical VOC documents using OpenAI embeddings and semantic matching.
-    
-    **Data & Storage:**
-    - The app uses precomputed embeddings for 20 inventory numbers, automatically downloaded from cloud storage on first run
-    - Data is cached locally in `text-metadata-sqlite/` (database) and `embeddings/` (FAISS indexes)
-    - Total data size: approximately 200MB
-    
-    **API Key & Costs:**
-    - An OpenAI API key is required (enter in sidebar - stored only in your browser session, never on servers)
-    - Each search query costs approximately $0.0002 (one embedding generation per query)
-    - Optional translation (for non-Dutch queries) adds minimal cost (~$0.0001)
-    - Precomputed document embeddings are reused, so they don't incur costs per query
-    
-    **Search Features:**
-    - 300-word chunks with 75-word overlap across 20 inventory numbers
-    - Chunks respect document boundaries (TANAP IDs) but can cross scan boundaries
-    - Metadata (year, place, establishment, document category) enriches chunks and enables filtering
-    - Multi-language queries supported with automatic translation to modern Dutch
-    - Flexible result ranking: top K per inventory or top K overall across all inventories
-    - Similarity threshold filtering to control result quality
-    
-    **Methodology:**
-    - Text chunks are enriched with metadata building on [Renate Smit's work](https://github.com/globalise-huygens/Inventorization-and-Metadata)
-    - For detailed methodology and technical documentation, see the [GitHub repository](https://github.com/globalise-huygens/globalise-natural-language-search-experiments/tree/streamlit)
-    - For different settings (chunk size, overlap), run the app locally, rebuild the database and re-generate embeddings (note: this requires API key and incurs costs)
-    """
+
+# Show intro text in an expander - collapsed if results are present
+has_results = 'search_results' in st.session_state and not st.session_state.get('search_results', pd.DataFrame()).empty
+with st.expander("ℹ️ About this tool", expanded=not has_results):
+    st.markdown(
+        """
+        Interactive search in historical VOC documents using OpenAI embeddings and semantic matching.
+        
+        **Data & Storage:**
+        - The app uses precomputed embeddings for 20 inventory numbers, automatically downloaded from cloud storage on first run
+        - Data is cached locally in `text-metadata-sqlite/` (database) and `embeddings/` (FAISS indexes)
+        - Total data size: approximately 200MB
+        
+        **API Key & Costs:**
+        - An OpenAI API key is required (enter in sidebar - stored only in your browser session, never on servers)
+        - Each search query costs approximately $0.0002 (one embedding generation per query)
+        - Optional translation (for non-Dutch queries) adds minimal cost (~$0.0001)
+        - Precomputed document embeddings are reused, so they don't incur costs per query
+        
+        **Search Features:**
+        - 300-word chunks with 75-word overlap across 20 inventory numbers
+        - Chunks respect document boundaries (TANAP IDs) but can cross scan boundaries
+        - Metadata (year, place, establishment, document category) enriches chunks and enables filtering
+        - Multi-language queries supported with automatic translation to modern Dutch
+        - Flexible result ranking: top K per inventory or top K overall across all inventories
+        - Similarity threshold filtering to control result quality
+        
+        **Methodology:**
+        - Text chunks are enriched with metadata building on [Renate Smit's work](https://github.com/globalise-huygens/Inventorization-and-Metadata)
+        - For detailed methodology and technical documentation, see the [GitHub repository](https://github.com/globalise-huygens/globalise-natural-language-search-experiments/tree/streamlit)
+        - For different settings (chunk size, overlap), run the app locally, rebuild the database and re-generate embeddings (note: this requires API key and incurs costs)
+        """
+    )
+
+# Search interface - prominent at the top
+st.markdown("## 🔍 Search Query")
+
+# Translation option
+translate_query = st.checkbox(
+    "Query in language other than Dutch", 
+    value=False,
+    help="If checked, the query will be automatically translated to Dutch before searching."
 )
 
+query_text = st.text_input(
+    "Enter your search query (any language)",
+    placeholder="E.g. events around a specific place...",
+)
+
+run_search = st.button("Search", type="primary")
+
+# Sidebar with configuration
 with st.sidebar:
     st.header("⚙️ Configuration")
     
@@ -198,22 +220,7 @@ if build_db:
                 st.error(f"Error building database: {e}")
                 st.code(traceback.format_exc())
 
-st.markdown("## 🔍 Search Query")
-
-# Translation option
-translate_query = st.checkbox(
-    "Query in language other than Dutch", 
-    value=False,
-    help="If checked, the query will be automatically translated to Dutch before searching."
-)
-
-query_text = st.text_input(
-    "Enter your search query (any language)",
-    placeholder="E.g. events around a specific place...",
-)
-
-run_search = st.button("Search")
-
+# Process search
 if run_search:
     if not api_key:
         st.error("Please enter a valid OpenAI API key first.")
@@ -241,6 +248,13 @@ if run_search:
                 st.session_state['query_text'] = query_text
                 st.session_state['min_similarity'] = min_similarity
                 st.session_state['top_k_mode'] = top_k_mode
+                
+                # Show message if no results meet the threshold
+                if df_results.empty:
+                    st.warning(
+                        f"No results found with similarity ≥ {min_similarity:.2f}. "
+                        f"Try lowering the minimum similarity threshold in the sidebar (currently set to {min_similarity:.2f})."
+                    )
             except Exception as e:
                 st.error(f"Search failed: {e}")
                 st.code(traceback.format_exc())
