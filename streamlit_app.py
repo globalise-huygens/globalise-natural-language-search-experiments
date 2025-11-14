@@ -426,7 +426,7 @@ if 'search_results' in st.session_state and not st.session_state['search_results
                 pages_display = ", ".join(pages_list) if len(pages_list) > 1 else pages_list[0]
                 
                 with st.expander(
-                    f"**{idx + 1}.** Inv {row['inv_nr']} | Similarity: {row['similarity']:.3f} | {row['datum']} | {row['plaats']}"
+                    f"**{idx + 1}.** Inv. no. {row['inv_nr']} | {row['start_page']} | Similarity: {row['similarity']:.3f} | {row['datum']} | {row['plaats']}"
                 ):
                     col1, col2 = st.columns([3, 1])
                     
