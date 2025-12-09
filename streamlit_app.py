@@ -85,6 +85,12 @@ with st.expander("ℹ️ About this tool", expanded=not has_results):
         - Precomputed document embeddings are reused, so they don't incur costs per query
         
         **Search Features:**
+        - **Semantic Search:** Uses OpenAI embeddings (text-embedding-3-large) to find conceptually similar documents even with different wording
+        - **Optional Hybrid Search (BM25):** Combine semantic search with keyword matching for better retrieval of proper names and technical terms:
+          - Searches for exact word matches (after stemming) in documents and metadata
+          - Blends semantic and keyword results with adjustable weight (0%–100%)
+          - Shows separate scores for transparency (semantic score + BM25 score)
+          - Best for queries with specific names, places, or technical terms
         - 300-word chunks with 75-word overlap across 20 inventory numbers
         - Chunks respect document boundaries (TANAP IDs) but can cross scan boundaries
         - Metadata (year, place, establishment, document category) enriches chunks and enables filtering
@@ -216,7 +222,7 @@ with st.sidebar:
         "Minimum similarity threshold",
         min_value=0.0,
         max_value=1.0,
-        value=0.45,
+        value=0.40,
         step=0.01,
         help="Only show results with similarity score above this threshold (0-1 scale)",
     )
@@ -245,9 +251,35 @@ with st.sidebar:
             "ℹ️ Length adjustment applies a gentle boost to longer chunks (up to target length of 300 words) to counteract the tendency of short chunks to score artificially high in semantic similarity."
         )
 
+    # --- Hybrid search (BM25) options ---
+    st.markdown("---")
+    st.subheader("🔤 Hybrid search (experimental)")
+
+    use_bm25 = st.checkbox(
+        "Enable BM25 keyword search",
+        value=False,
+        help="Combine semantic search with exact keyword matching. Useful for finding specific names, places, or technical terms that might be missed by semantic search alone.",
+    )
+
+    if use_bm25:
+        bm25_weight = st.slider(
+            "BM25 weight",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.3,
+            step=0.05,
+            help="Balance between semantic (0.0) and keyword (1.0) matching. 0.3 means 70% semantic + 30% keyword.",
+        )
+        st.caption(
+            "ℹ️ BM25 excels at finding exact matches for names, places, and technical terms. Semantic search is better for conceptual queries. This hybrid approach lets you experiment with both."
+        )
+    else:
+        bm25_weight = 0.0
+
     st.markdown("---")
     st.caption("Database path: text-metadata-sqlite/voc_documents.db")
     st.caption("Embeddings folder: embeddings/")
+    st.caption("BM25 indices folder: bm25_indices/")
 
 # Use the session state API key
 api_key = st.session_state.api_key
@@ -284,6 +316,8 @@ if run_search:
                     inv_nrs=selected_inv_nrs,
                     top_k=int(top_k),
                     translate_if_not_dutch=translate_query,
+                    use_bm25=use_bm25,
+                    bm25_weight=bm25_weight,
                 )
 
                 # Calculate word counts
@@ -564,6 +598,10 @@ if (
                 # Build header with similarity info
                 header = f"**{idx + 1}.** Inv. no. {row['inv_nr']} | {row['start_page']} | Similarity: {row['similarity']:.3f}"
 
+                # Add score breakdown for hybrid search
+                if "bm25_score" in row and pd.notna(row["bm25_score"]):
+                    header += f" (semantic: {row['semantic_score']:.3f}, BM25: {row['bm25_score']:.3f})"
+
                 # Add word count if available
                 if "word_count" in row and pd.notna(row["word_count"]):
                     header += f" | {int(row['word_count'])} words"
@@ -613,6 +651,12 @@ if (
                     "tanap_id",
                     "similarity",
                 ]
+
+                # Add score columns if available
+                if "semantic_score" in df_display.columns:
+                    base_columns.append("semantic_score")
+                if "bm25_score" in df_display.columns:
+                    base_columns.append("bm25_score")
 
                 # Add word_count if available
                 if "word_count" in df_display.columns:

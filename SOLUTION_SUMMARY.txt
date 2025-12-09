@@ -1,0 +1,59 @@
+================================================================================
+BM25 SCORING ISSUE - COMPLETE SOLUTION SUMMARY
+================================================================================
+
+ISSUE REPORTED:
+  Query: "activiteiten van weduwen in ternate"
+  Problem: Irrelevant chunk (Ternate location only) got BM25 score of 1.0
+           Highly relevant chunk (mentions weduwe) got BM25 score of 0.0
+  
+SEVERITY: Critical - BM25 was backwards
+
+ROOT CAUSES:
+  1. No stemming → singular/plural don't match (weduwe ≠ weduwen)
+  2. Missing query terms penalize scores → negative scores
+  3. Poor normalization → can't handle negative/zero scores
+
+SOLUTION IMPLEMENTED:
+  ✅ 1. Dutch stemming (NLTK SnowballStemmer)
+  ✅ 2. Query token filtering (only use terms in corpus)
+  ✅ 3. Improved normalization (shift-and-scale to [0,1])
+  ✅ 4. Recreated BM25 indices with new tokenization
+
+FILES CHANGED:
+  - requirements.txt (added nltk>=3.8)
+  - app_core.py (~100 lines modified)
+  - bm25_indices/ (20 indices recreated)
+
+VERIFICATION:
+  ✅ Stemming works: weduwe/weduwen → weduw
+  ✅ Stemming works: ternate/ternaten → ternat
+  ✅ Indices recreated with new tokenization
+  ✅ Code compiles and imports successfully
+
+EXPECTED BEHAVIOR AFTER FIX:
+  Query: "activiteiten van weduwen in ternate"
+  
+  Doc 1 (Ternate only):
+    Raw BM25: -0.0078
+    Normalized: 0.000 ✅
+    
+  Doc 2 (weduwe + Ternate):
+    Raw BM25: -0.0051 (higher than Doc1!)
+    Normalized: 1.000 ✅
+    
+  Result: Doc 2 ranks much higher than Doc 1 ✅
+
+HOW TO TEST:
+  1. python -m streamlit run streamlit_app.py
+  2. Query: "activiteiten van weduwen in ternate"
+  3. Enable BM25 checkbox
+  4. Verify: Weduwe chunks rank high, location-only chunks rank low
+
+DOCUMENTATION:
+  - BM25_SCORING_RESOLVED.md - Complete explanation
+  - BM25_FIXES.md - Technical details
+  - TESTING_BM25_FIXES.md - Testing guide
+
+STATUS: ✅ READY FOR TESTING
+================================================================================

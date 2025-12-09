@@ -32,6 +32,7 @@ On first run, the app will automatically download and extract the precomputed da
 See [DEPLOYMENT.md](DEPLOYMENT.md) for complete instructions on deploying to Streamlit Cloud with precomputed embeddings for team use.
 
 Quick summary:
+
 1. Run `python precompute_embeddings.py` locally to generate all embeddings
 2. Commit `embeddings/` and `text-metadata-sqlite/` to git
 3. Deploy to Streamlit Cloud (no secrets needed - users provide their own API keys)
@@ -43,7 +44,8 @@ This repository includes a Streamlit web application for exploring natural-langu
 
 ### Features
 
-- Semantic search across historical Dutch VOC documents from 20 inventory numbers
+- **Semantic search** across historical Dutch VOC documents from 20 inventory numbers
+- **Hybrid BM25 keyword search** (optional) for improved retrieval of proper names and technical terms
 - Multi-language query support with automatic translation to modern Dutch
 - Flexible result ranking: top K per inventory number or top K overall across all inventories
 - Similarity threshold filtering to control result quality
@@ -57,6 +59,7 @@ This repository includes a Streamlit web application for exploring natural-langu
 - `text_input_metadata/` - Source CSV files with document text and metadata per inventory number
 - `text-metadata-sqlite/` - SQLite database with chunks and metadata (approximately 96MB)
 - `embeddings/` - FAISS indexes per inventory number (approximately 109MB, `.index` files)
+- `bm25_indices/` - BM25 keyword search indices per inventory number (approximately 5-10MB each, created automatically)
 - `results/` - User-generated search results (not committed to git)
 
 On Streamlit Cloud and first local runs, the database and embeddings are automatically downloaded from cloud storage (https://surfdrive.surf.nl/s/8edwicW2DYd8QAB) and cached locally.
@@ -68,17 +71,26 @@ On Streamlit Cloud and first local runs, the database and embeddings are automat
 3. Storage: Chunks and metadata are stored in SQLite database (`text-metadata-sqlite/voc_documents.db`).
 4. Embeddings: FAISS indexes are created per inventory number using OpenAI's `text-embedding-3-large` model (3072 dimensions). Metadata is weighted and incorporated into embeddings.
 5. Search: User queries are optionally translated to Dutch, embedded, and matched against FAISS indexes using cosine similarity.
-6. Filtering: Results can be filtered by similarity threshold, year range, place, establishment, and document category.
-7. Ranking: Results are ranked by similarity score, with options for per-inventory or overall ranking.
+6. Hybrid search (optional): If enabled, results are enhanced with BM25 (Okapi BM25) keyword matching to improve retrieval of proper names and technical terms:
+   - BM25 uses the same weighted metadata (plaats, vestiging, jaar, beschrijving) as embeddings for consistency
+   - Query tokens are stemmed (Dutch Snowball stemmer) and filtered to corpus vocabulary to avoid penalty for rare/misspelled terms
+   - BM25 scores are max-normalized and scaled to match semantic score range
+   - Final score: `(1 - weight) × semantic_score + weight × bm25_scaled`
+   - Users control the semantic/keyword balance with an adjustable weight (0.0=pure semantic, 1.0=pure BM25, default 0.3)
+   - BM25 scores appear as separate column in results for transparency
+7. Filtering: Results can be filtered by similarity threshold, year range, place, establishment, and document category.
+8. Ranking: Results are ranked by similarity score (or hybrid combined score if BM25 enabled), with options for per-inventory or overall ranking.
 
 ### Usage Modes
 
 Local mode:
+
 - Rebuild database from source CSV files with custom chunking parameters
 - Generate embeddings on-demand for new inventory numbers
 - Full read/write access to all settings
 
 Cloud mode (Streamlit Cloud):
+
 - Database rebuild options are disabled (greyed out)
 - Uses precomputed database and embeddings downloaded automatically on startup
 - Each user provides their own OpenAI API key (stored only in browser session)
@@ -87,6 +99,7 @@ Cloud mode (Streamlit Cloud):
 ### Cost Estimates
 
 Each search query requires:
+
 - Query embedding: 1 call to `text-embedding-3-large` (~$0.00013 per query)
 - Optional translation: 1 call to `gpt-4o-mini` if query is not in Dutch (~$0.0001)
 - Total typical cost: ~$0.0002 per search query
@@ -130,6 +143,44 @@ The `natural-language-search.ipynb` notebook contains the original exploratory a
 - Top K mode: Per inventory number (default: 25) or overall across all inventories (default: 50)
 - Result filtering: Year range, place, establishment, document category
 
+### Hybrid Search: BM25 Keyword Matching
+
+**Algorithm:** Okapi BM25 (rank-bm25 library implementation)
+
+**Preprocessing:**
+
+- Query tokens and corpus are stemmed using NLTK's Dutch Snowball stemmer
+- Stopwords removed (common Dutch words: de, het, een, van, op, etc.)
+- Tokens shorter than 3 characters filtered out
+- Punctuation removed; text lowercased
+
+**Scoring Logic:**
+
+1. Build corpus vocabulary from all documents
+2. Filter query tokens to only those in vocabulary (avoids penalizing for rare/misspelled terms)
+3. Calculate BM25 scores using the filtered query tokens
+4. Normalize BM25 scores: `bm25_normalized = bm25_raw / bm25_max` (keeps zeros for non-matches)
+5. Scale normalized BM25 to semantic score range: `bm25_scaled = bm25_normalized × semantic_max`
+6. Blend with semantic scores: `final_score = (1 - weight) × semantic + weight × bm25_scaled`
+
+**Key Features:**
+
+- **Metadata Integration:** BM25 indexes the same weighted metadata (plaats, vestiging, jaar, beschrijving) as embeddings, ensuring keyword matches consider document context
+- **Consistency:** Both semantic and BM25 use identical tokenization/stemming for reliable combination
+- **Transparency:** BM25 scores shown separately in results for understanding the ranking
+- **Configurability:** Weight slider (0.0–1.0) lets users tune semantic vs. keyword balance
+
+**Best Use Cases:**
+
+- Searching for specific person names, place names, or proper nouns (semantic search often misses exact matches)
+- Technical terms or historical jargon (benefit from exact matching)
+- Queries mixing conceptual terms with specific proper names
+
+**Limitations:**
+
+- Relies on exact token matching; doesn't understand synonyms or related concepts
+- Less effective for paraphrased queries or conceptual search (use semantic search for these)
+
 ## Security and Privacy
 
 - API keys: Never committed to git; stored only in browser session memory (Streamlit session state)
@@ -150,6 +201,7 @@ To add new inventory numbers:
 ## Methodology
 
 For detailed information about the methodology, data sources, and research context, see:
+
 - The research notebook: `natural-language-search.ipynb`
 - The deployment guide: `DEPLOYMENT.md`
 - Renate Smit's metadata work: https://github.com/globalise-huygens/Inventorization-and-Metadata

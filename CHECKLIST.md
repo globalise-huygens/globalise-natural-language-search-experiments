@@ -5,16 +5,20 @@ Before deploying to Streamlit Cloud, complete these steps:
 ## ✅ Local Preparation
 
 - [ ] **Set up environment**
+
   ```bash
   pip install -r requirements.txt
   echo "OPENAI_API_KEY=your_key_here" > .env
   ```
 
 - [ ] **Precompute all embeddings**
+
   ```bash
   python precompute_embeddings.py
   ```
+
   Expected output:
+
   - `text-metadata-sqlite/voc_documents.db` (~96MB)
   - `embeddings/*.db` (one per inventory number, ~109MB total)
 
@@ -30,11 +34,13 @@ Before deploying to Streamlit Cloud, complete these steps:
 ## 📦 Git Repository
 
 - [ ] **Check file structure**
+
   ```bash
   git status
   ```
-  
+
   Should include:
+
   - ✅ `text-metadata-sqlite/voc_documents.db`
   - ✅ `embeddings/*.db` (all inventory numbers)
   - ✅ `.streamlit/config.toml`
@@ -43,12 +49,14 @@ Before deploying to Streamlit Cloud, complete these steps:
   - ✅ `app_core.py`
   - ✅ `DEPLOYMENT.md`
   - ✅ `README.md`
-  
+
   Should NOT include:
+
   - ❌ `.env` (excluded by .gitignore)
   - ❌ `results/*.csv` (excluded by .gitignore)
 
 - [ ] **Commit precomputed data**
+
   ```bash
   git add text-metadata-sqlite/ embeddings/ .streamlit/
   git commit -m "Add precomputed embeddings and database for deployment"
@@ -62,10 +70,12 @@ Before deploying to Streamlit Cloud, complete these steps:
 ## ☁️ Streamlit Cloud Setup
 
 - [ ] **Create Streamlit Cloud account**
+
   - Go to https://share.streamlit.io
   - Sign in with GitHub
 
 - [ ] **Deploy app**
+
   1. Click "New app"
   2. Select your repository
   3. Branch: `main` (or your default branch)
@@ -73,6 +83,7 @@ Before deploying to Streamlit Cloud, complete these steps:
   5. Click "Deploy"
 
 - [ ] **Wait for deployment**
+
   - Initial build: 2-5 minutes
   - Watch logs for errors
 
@@ -86,12 +97,14 @@ Before deploying to Streamlit Cloud, complete these steps:
 ## 🔒 Security Verification
 
 - [ ] **API key handling**
+
   - Confirm: No default API key visible in sidebar
   - Confirm: API key field is `type="password"` (shows dots)
   - Confirm: Help text mentions "never saved"
   - Confirm: API key clears after closing browser
 
 - [ ] **Cloud mode restrictions**
+
   - Confirm: "Database rebuild" option NOT visible on Streamlit Cloud
   - Confirm: Info message says "Database en embeddings zijn vooraf berekend"
   - Confirm: Search works without needing to create new embeddings
@@ -104,10 +117,12 @@ Before deploying to Streamlit Cloud, complete these steps:
 ## 👥 Team Onboarding
 
 - [ ] **Share app URL**
+
   - Get URL from Streamlit Cloud dashboard
   - Share with team members
 
 - [ ] **Provide user instructions**
+
   - Share the "User Instructions" section from DEPLOYMENT.md
   - Explain API key requirements
   - Share cost estimates
@@ -120,6 +135,7 @@ Before deploying to Streamlit Cloud, complete these steps:
 ## 🔄 Future Updates
 
 - [ ] **Adding new inventory numbers**
+
   1. Add CSV to `text-input/`
   2. Run `python precompute_embeddings.py`
   3. Commit and push updated `embeddings/` and `text-metadata-sqlite/`
@@ -134,6 +150,7 @@ Before deploying to Streamlit Cloud, complete these steps:
 ## 📊 Monitoring
 
 - [ ] **Set up usage tracking** (optional)
+
   - Monitor Streamlit Cloud usage dashboard
   - Track OpenAI API usage per user (they use their own keys)
   - Set up alerts for app downtime
@@ -155,18 +172,22 @@ Before deploying to Streamlit Cloud, complete these steps:
 ## Common Issues & Solutions
 
 ### "Module not found" on Streamlit Cloud
+
 - **Solution**: Check `requirements.txt` has all dependencies
 - Run `pip freeze > requirements.txt` locally
 
 ### "Embeddings not found" error
+
 - **Solution**: Ensure `embeddings/` folder is committed to git
 - Re-run `python precompute_embeddings.py` and commit
 
 ### App is slow/crashes
+
 - **Solution**: Check Streamlit Cloud resource limits
 - Consider upgrading tier or optimizing FAISS indexes
 
 ### Users can't enter API key
+
 - **Solution**: Verify session state initialization in `streamlit_app.py`
 - Check browser console for JavaScript errors
 
