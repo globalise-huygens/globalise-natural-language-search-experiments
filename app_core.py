@@ -1,6 +1,7 @@
 import os
 import re
 import sqlite3
+import json
 from pathlib import Path
 from typing import Iterable, List, Tuple, Optional
 import pickle
@@ -13,6 +14,12 @@ from openai import OpenAI
 from tqdm import tqdm
 from rank_bm25 import BM25Okapi
 from nltk.stem.snowball import SnowballStemmer
+
+try:
+    from langdetect import detect, LangDetectException
+except ImportError:
+    detect = None
+    LangDetectException = None
 
 
 # --- Environment & constants ---
@@ -67,13 +74,31 @@ def chunk_within_docs(
             all_words.extend(words)
             page_boundaries.append((word_count, row["filename"]))
             word_count += len(words)
+        page_spans = []
+        for i, (start_idx, filename) in enumerate(page_boundaries):
+            end_idx = (
+                page_boundaries[i + 1][0]
+                if i + 1 < len(page_boundaries)
+                else word_count
+            )
+            page_spans.append((start_idx, end_idx, filename))
         start = 0
         while start < len(all_words):
             end = min(start + chunk_size, len(all_words))
             chunk_words = all_words[start:end]
-            pages_in_chunk = [p for idx_p, p in page_boundaries if start <= idx_p < end]
+            pages_in_chunk = [
+                filename
+                for span_start, span_end, filename in page_spans
+                if span_start < end and span_end > start
+            ]
             if not pages_in_chunk:
                 pages_in_chunk = [df_doc.iloc[-1]["filename"]]
+            else:
+                # Preserve order while removing duplicates
+                seen = set()
+                pages_in_chunk = [
+                    p for p in pages_in_chunk if not (p in seen or seen.add(p))
+                ]
             all_chunks.append(
                 {
                     "inv_nr": meta["inv_nr"],
@@ -194,6 +219,132 @@ def ensure_database_from_text_inputs(
     return total_chunks
 
 
+def migrate_db_add_translation_columns() -> None:
+    """
+    Add translation columns to the documents table if they don't exist.
+    Idempotent - safe to call multiple times.
+    """
+    if not DB_PATH.exists():
+        print("Database does not exist yet")
+        return
+
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+
+        # Check if columns already exist
+        cur.execute("PRAGMA table_info(documents)")
+        columns = {row[1] for row in cur.fetchall()}
+
+        # Add columns if missing
+        if "text_translated_detailed" not in columns:
+            cur.execute(
+                "ALTER TABLE documents ADD COLUMN text_translated_detailed TEXT DEFAULT NULL"
+            )
+            print("✓ Added text_translated_detailed column")
+
+        if "text_translated_clean" not in columns:
+            cur.execute(
+                "ALTER TABLE documents ADD COLUMN text_translated_clean TEXT DEFAULT NULL"
+            )
+            print("✓ Added text_translated_clean column")
+
+        if "translation_model" not in columns:
+            cur.execute(
+                "ALTER TABLE documents ADD COLUMN translation_model TEXT DEFAULT NULL"
+            )
+            print("✓ Added translation_model column")
+
+        if "translation_date" not in columns:
+            cur.execute(
+                "ALTER TABLE documents ADD COLUMN translation_date TEXT DEFAULT NULL"
+            )
+            print("✓ Added translation_date column")
+
+        conn.commit()
+
+
+def import_translations_from_json(json_file: Path) -> int:
+    """
+    Import translations from JSON file into the database.
+    Updates existing rows with translation columns based on inv_nr + tanap_id + chunk_id matching.
+    Falls back to rowid if inv_nr/tanap_id/chunk_id are missing.
+    Returns number of translations imported.
+    """
+    if not DB_PATH.exists():
+        raise FileNotFoundError(f"Database not found at {DB_PATH}")
+
+    if not json_file.exists():
+        raise FileNotFoundError(f"Translation JSON file not found at {json_file}")
+
+    # First ensure columns exist
+    migrate_db_add_translation_columns()
+
+    # Load translations from JSON
+    with open(json_file, "r", encoding="utf-8") as f:
+        translations = json.load(f)
+
+    print(f"📥 Importing {len(translations)} translations from {json_file.name}...")
+
+    # Update database with translations
+    imported = 0
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+
+        for trans in translations:
+            inv_nr = trans.get("inv_nr")
+            tanap_id = trans.get("tanap_id")
+            chunk_id = trans.get("chunk_id")
+            rowid = trans.get("rowid")
+
+            if inv_nr is not None and tanap_id is not None and chunk_id is not None:
+                cur.execute(
+                    """
+                    UPDATE documents
+                    SET text_translated_detailed = ?,
+                        text_translated_clean = ?,
+                        translation_model = ?,
+                        translation_date = ?
+                    WHERE inv_nr = ? AND tanap_id = ? AND chunk_id = ?
+                    """,
+                    (
+                        trans.get("text_translated_detailed"),
+                        trans.get("text_translated_clean"),
+                        trans.get("translation_model"),
+                        trans.get("translation_date"),
+                        str(inv_nr),
+                        str(tanap_id),
+                        int(chunk_id),
+                    ),
+                )
+            elif rowid is not None:
+                cur.execute(
+                    """
+                    UPDATE documents
+                    SET text_translated_detailed = ?,
+                        text_translated_clean = ?,
+                        translation_model = ?,
+                        translation_date = ?
+                    WHERE rowid = ?
+                    """,
+                    (
+                        trans.get("text_translated_detailed"),
+                        trans.get("text_translated_clean"),
+                        trans.get("translation_model"),
+                        trans.get("translation_date"),
+                        rowid,
+                    ),
+                )
+            else:
+                continue
+
+            imported += 1
+
+        conn.commit()
+
+    print(f"✅ Imported {imported} translations")
+    return imported
+
+
 def list_available_inv_nrs() -> List[str]:
     """List inventory numbers from DB if present, else from text_input_metadata CSV names."""
     if DB_PATH.exists():
@@ -206,6 +357,58 @@ def list_available_inv_nrs() -> List[str]:
                 return invs
     # Fallback to files
     return sorted([p.stem.split("_")[0] for p in DATA_DIR.glob("*.csv")])
+
+
+def get_translations_by_chunks(
+    inv_nr: str, chunk_ids: List[int], tanap_id: Optional[str] = None
+) -> dict:
+    """
+    Fetch translations for specific chunks.
+
+    Args:
+        inv_nr: Inventory number
+        chunk_ids: List of chunk IDs to fetch translations for
+
+    Returns:
+        Dict mapping (inv_nr, chunk_id) tuples to translation data:
+        {
+            (inv_nr, chunk_id): {
+                'text_translated_detailed': str,
+                'text_translated_clean': str
+            },
+            ...
+        }
+    """
+    if not DB_PATH.exists():
+        return {}
+
+    translations = {}
+    if not chunk_ids:
+        return translations
+
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            # Create placeholder string for parameterized query
+            placeholders = ",".join("?" * len(chunk_ids))
+            tanap_clause = " AND tanap_id = ?" if tanap_id is not None else ""
+            query = f"""
+                SELECT chunk_id, text, text_translated_detailed, text_translated_clean
+                FROM documents
+                WHERE inv_nr = ?{tanap_clause} AND chunk_id IN ({placeholders})
+            """
+            params = [inv_nr] + ([tanap_id] if tanap_id is not None else []) + chunk_ids
+            rows = conn.execute(query, params).fetchall()
+
+            for chunk_id, text_original, text_detailed, text_clean in rows:
+                translations[(inv_nr, chunk_id)] = {
+                    "text_original": text_original,
+                    "text_translated_detailed": text_detailed,
+                    "text_translated_clean": text_clean,
+                }
+    except Exception as e:
+        print(f"⚠️  Error fetching translations: {e}")
+
+    return translations
 
 
 def get_filter_options() -> dict:
@@ -282,9 +485,24 @@ def get_filter_options() -> dict:
 
 
 # --- Embeddings & search ---
-def _embeddings_file(inv_nr: str) -> Path:
+def _embeddings_file(inv_nr: str, mode: str = "original") -> Path:
+    """
+    Get path to FAISS embedding index file.
+
+    Args:
+        inv_nr: Inventory number
+        mode: 'original' for Dutch text, 'translated' for English text
+
+    Returns:
+        Path object for the FAISS index file
+    """
     EMB_DIR.mkdir(exist_ok=True)
-    return EMB_DIR / f"{inv_nr}.index"
+    if mode == "original":
+        return EMB_DIR / f"{inv_nr}.index"
+    elif mode == "translated":
+        return EMB_DIR / f"{inv_nr}_translated.index"
+    else:
+        raise ValueError(f"Invalid mode: {mode}. Must be 'original' or 'translated'.")
 
 
 def _bm25_file(inv_nr: str) -> Path:
@@ -321,6 +539,53 @@ def _safe_col(df, col):
     if col in df.columns:
         return df[col].fillna("").astype(str)
     return pd.Series([""] * len(df), index=df.index, dtype=str)
+
+
+def _prepare_combined_text_for_embeddings(df_chunks: pd.DataFrame) -> List[str]:
+    """
+    Build lightweight combined text for embeddings.
+    Unlike BM25, we don't heavily repeat metadata - we just include it once.
+    This keeps token count under embedding model's limit.
+    """
+    df_chunks = df_chunks.copy()
+    df_chunks["text"] = _safe_col(df_chunks, "text")
+    df_chunks["plaats"] = _safe_col(df_chunks, "plaats")
+    df_chunks["vestiging"] = _safe_col(df_chunks, "vestiging")
+    df_chunks["beschrijving"] = _safe_col(df_chunks, "beschrijving")
+    df_chunks["datum"] = _safe_col(df_chunks, "datum")
+    df_chunks["jaar"] = df_chunks["datum"].str.extract(r"(\d{4})")[0].fillna("")
+
+    combined_texts = []
+    for idx, row in df_chunks.iterrows():
+        # Build metadata once (not repeated)
+        plaats_str = _expand_places(row["plaats"])
+        metadata_parts = [
+            plaats_str if plaats_str else "",
+            f"Vestiging: {row['vestiging']}" if row["vestiging"] else "",
+            f"Jaar: {row['jaar']}" if row["jaar"] else "",
+            f"Beschrijving: {row['beschrijving']}" if row["beschrijving"] else "",
+        ]
+        metadata = " ".join([p for p in metadata_parts if p]).strip()
+
+        # Get main text and truncate if needed to avoid exceeding token limits
+        main_text = row["text"].strip()
+        # Truncate to ~6000 chars to ensure we stay under 8192 token limit
+        if len(main_text) > 6000:
+            main_text = main_text[:6000] + "..."
+
+        # Combine metadata with main text
+        if metadata and main_text:
+            combined = f"{metadata}. {main_text}"
+        elif metadata:
+            combined = metadata
+        elif main_text:
+            combined = main_text
+        else:
+            combined = ""
+
+        combined_texts.append(combined)
+
+    return combined_texts
 
 
 def _prepare_combined_text(df_chunks: pd.DataFrame) -> pd.DataFrame:
@@ -493,12 +758,22 @@ def create_or_load_bm25_index(inv_nr: str) -> Tuple[BM25Okapi, List[str]]:
 
 
 def load_or_create_embeddings(
-    inv_nr: str, client: OpenAI
+    inv_nr: str, client: OpenAI, mode: str = "original", use_cache: bool = True
 ) -> Tuple[faiss.IndexFlatL2, List[str]]:
     """
     Load FAISS index for an inv_nr or create it from the SQLite documents.
-    Uses weighted metadata (plaats, vestiging, jaar, beschrijving) in embeddings.
-    Returns (faiss_index, chunks_texts)
+    Uses lightweight metadata in embeddings (included once, not repeated).
+
+    Args:
+        inv_nr: Inventory number
+        client: OpenAI client
+        mode: 'original' for Dutch text, 'translated' for English text
+        use_cache: Whether to use cached embeddings if they exist
+
+    Returns:
+        (faiss_index, chunks_texts) tuple
+        - faiss_index: FAISS index for searching
+        - chunks_texts: List of text strings corresponding to embedding vectors
 
     On Streamlit Cloud, only loads pre-existing embeddings (no creation).
     """
@@ -517,15 +792,37 @@ def load_or_create_embeddings(
     if df_chunks.empty:
         raise ValueError(f"No data found for inv_nr {inv_nr} in the database.")
 
-    # Build combined text (weighted metadata) using shared helper for consistency
-    df_chunks = _prepare_combined_text(df_chunks)
-    chunks_inv = df_chunks["combined_text"].tolist()
+    # Determine which text column to use based on mode
+    if mode == "original":
+        # Use original Dutch text with lightweight metadata
+        chunks_inv = _prepare_combined_text_for_embeddings(df_chunks)
+    elif mode == "translated":
+        # Check if translations exist
+        if (
+            "text_translated_clean" not in df_chunks.columns
+            or df_chunks["text_translated_clean"].isna().all()
+        ):
+            raise ValueError(
+                f"No translated text found for {inv_nr}. "
+                "Please run translate_chunks.py and import_translations.py first."
+            )
+        # Build combined text with translated text and lightweight metadata
+        df_chunks = df_chunks.copy()
+        df_chunks["text"] = df_chunks["text_translated_clean"].fillna("").astype(str)
+        chunks_inv = _prepare_combined_text_for_embeddings(df_chunks)
+    else:
+        raise ValueError(f"Invalid mode: {mode}. Must be 'original' or 'translated'.")
 
     if not chunks_inv:
         raise ValueError(f"All chunks for {inv_nr} are empty after cleaning.")
 
-    emb_file = _embeddings_file(inv_nr)
-    if emb_file.exists():
+    # Filter out empty chunks
+    chunks_inv = [c for c in chunks_inv if c.strip()]
+    if not chunks_inv:
+        raise ValueError(f"All chunks for {inv_nr} are empty after filtering.")
+
+    emb_file = _embeddings_file(inv_nr, mode=mode)
+    if use_cache and emb_file.exists():
         faiss_idx = faiss.read_index(str(emb_file))
         return faiss_idx, chunks_inv
 
@@ -533,16 +830,14 @@ def load_or_create_embeddings(
     is_cloud = os.getenv("STREAMLIT_SHARING_MODE") or os.getenv("STREAMLIT_CLOUD")
     if is_cloud:
         raise RuntimeError(
-            f"Embeddings for {inv_nr} not found. On Streamlit Cloud, all embeddings must be precomputed. "
+            f"Embeddings for {inv_nr} ({mode} mode) not found. On Streamlit Cloud, all embeddings must be precomputed. "
             "Please generate embeddings locally and commit them to the repository."
         )
 
     # Create embeddings (only in local development)
     embeddings: List[List[float]] = []
-    batch_size = 50
-    print(
-        f"🧠 Computing embeddings for {inv_nr} ({len(chunks_inv)} chunks, with weighted metadata)..."
-    )
+    batch_size = 20  # Small batch size to stay under token limit
+    print(f"🧠 Computing {mode} embeddings for {inv_nr} ({len(chunks_inv)} chunks)...")
     for i in tqdm(range(0, len(chunks_inv), batch_size)):
         batch = chunks_inv[i : i + batch_size]
         try:
@@ -552,18 +847,18 @@ def load_or_create_embeddings(
             ]
             embeddings.extend(batch_embeddings)
         except Exception as e:
-            print(f"Embedding batch {i} failed: {e}")
+            print(f"❌ Embedding batch {i} failed: {e}")
             continue
 
     if not embeddings:
-        raise RuntimeError(f"No embeddings created for {inv_nr}.")
+        raise RuntimeError(f"No embeddings created for {inv_nr} ({mode} mode).")
 
     emb_arr = np.array(embeddings, dtype="float32")
     dim = emb_arr.shape[1]
     faiss_idx = faiss.IndexFlatL2(dim)
     faiss_idx.add(emb_arr)
     faiss.write_index(faiss_idx, str(emb_file))
-    print(f"💾 Saved FAISS index for {inv_nr} -> {emb_file}")
+    print(f"💾 Saved {mode} FAISS index for {inv_nr} -> {emb_file}")
     return faiss_idx, chunks_inv
 
 
@@ -634,6 +929,7 @@ def search_query(
     translate_if_not_dutch: bool = True,
     use_bm25: bool = False,
     bm25_weight: float = 0.3,
+    mode: str = "original",
 ) -> pd.DataFrame:
     """
     Search across one or more inventory numbers and return a unified DataFrame.
@@ -647,6 +943,7 @@ def search_query(
         translate_if_not_dutch: Auto-translate non-Dutch queries to Dutch
         use_bm25: If True, use hybrid semantic + BM25 search
         bm25_weight: Weight for BM25 in hybrid scoring (0.0-1.0), semantic gets (1 - bm25_weight)
+        mode: Search mode - 'original' (Dutch embeddings), 'translated' (English embeddings), or 'both' (search both and merge)
     """
     RESULTS_DIR.mkdir(exist_ok=True)
     client = get_openai_client()
@@ -663,12 +960,31 @@ def search_query(
     if use_bm25:
         print(f"🔄 Using hybrid search (semantic + BM25, weight={bm25_weight})")
 
+    # Validate mode
+    if mode not in ("original", "translated", "both"):
+        raise ValueError(
+            f"Invalid mode: {mode}. Must be 'original', 'translated', or 'both'."
+        )
+
+    if mode == "both":
+        print(f"🔄 Comparison mode: searching both original and translated embeddings")
+
     all_results: List[pd.DataFrame] = []
-    for inv in inv_nrs:
-        print(f"\n🔎 Searching in {inv} ...")
-        faiss_idx, chunks_inv = load_or_create_embeddings(inv, client)
-        if not chunks_inv:
-            continue
+    modes_to_search = ["original", "translated"] if mode == "both" else [mode]
+
+    for search_mode in modes_to_search:
+        for inv in inv_nrs:
+            mode_label = f" ({search_mode})" if mode == "both" else ""
+            print(f"\n🔎 Searching in {inv}{mode_label} ...")
+            try:
+                faiss_idx, chunks_inv = load_or_create_embeddings(
+                    inv, client, mode=search_mode
+                )
+            except (ValueError, FileNotFoundError) as e:
+                print(f"⚠️  Skipped: {e}")
+                continue
+            if not chunks_inv:
+                continue
 
         # --- Semantic search (FAISS) ---
         q_emb = np.array(
@@ -811,8 +1127,12 @@ def search_query(
                 # Fall back to semantic-only scores
 
         with sqlite3.connect(DB_PATH) as conn:
+            # Select appropriate text column based on search mode
+            text_column = (
+                "text_translated_clean" if search_mode == "translated" else "text"
+            )
             df_meta = pd.read_sql_query(
-                "SELECT inv_nr, tanap_id, start_page, pages, chunk_id, datum, plaats, vestiging, beschrijving, doc_category, text FROM documents WHERE inv_nr=? ORDER BY chunk_id",
+                f"SELECT inv_nr, tanap_id, start_page, pages, chunk_id, datum, plaats, vestiging, beschrijving, doc_category, {text_column} as text FROM documents WHERE inv_nr=? ORDER BY chunk_id",
                 conn,
                 params=(inv,),
             )
@@ -842,6 +1162,10 @@ def search_query(
         df_res["semantic_score"] = semantic_scores
         if bm25_scores_arr is not None:
             df_res["bm25_score"] = bm25_scores_arr
+
+        # Add search mode source when doing comparison
+        if mode == "both":
+            df_res["search_source"] = search_mode
 
         # Extract year for filtering (done here so it's available in results)
         df_res["jaar"] = df_res["datum"].str.extract(r"(\d{4})")[0].fillna("")
@@ -880,6 +1204,8 @@ def search_query(
         ]
         if "bm25_score" in df_all.columns:
             columns.append("bm25_score")
+        if "search_source" in df_all.columns:
+            columns.append("search_source")
         columns.extend(["transcription_url", "text"])
         return df_all[columns]
 

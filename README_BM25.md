@@ -1,5 +1,7 @@
 # ✅ BM25 Hybrid Search Implementation - Complete
 
+> **Note**: This document describes the BM25 keyword search implementation. For information about the bilingual search and translation system added later, see [BATCH_TRANSLATION_GUIDE.md](BATCH_TRANSLATION_GUIDE.md) and the main [README.md](README.md).
+
 ## Status: Production Ready
 
 All components of the BM25 hybrid search feature have been successfully implemented and are ready for testing and deployment.

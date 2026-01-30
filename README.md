@@ -44,9 +44,12 @@ This repository includes a Streamlit web application for exploring natural-langu
 
 ### Features
 
-- **Semantic search** across historical Dutch VOC documents from 20 inventory numbers
+- **Bilingual semantic search** across historical Dutch VOC documents from 20 inventory numbers
+  - Search in original archaic Dutch OR modern English translations
+  - AI-powered translations using Claude Haiku 4.5 (17th-18th century VOC documents)
+  - Compare mode: view original Dutch and English translation side-by-side
 - **Hybrid BM25 keyword search** (optional) for improved retrieval of proper names and technical terms
-- Multi-language query support with automatic translation to modern Dutch
+- Multi-language query support with automatic translation to modern Dutch/English
 - Flexible result ranking: top K per inventory number or top K overall across all inventories
 - Similarity threshold filtering to control result quality
 - Interactive metadata-based filtering (year, place, establishment, document category)
@@ -57,9 +60,11 @@ This repository includes a Streamlit web application for exploring natural-langu
 ### Data Directories
 
 - `text_input_metadata/` - Source CSV files with document text and metadata per inventory number
-- `text-metadata-sqlite/` - SQLite database with chunks and metadata (approximately 96MB)
-- `embeddings/` - FAISS indexes per inventory number (approximately 109MB, `.index` files)
+- `text-metadata-sqlite/` - SQLite database with chunks, metadata, and translations (approximately 150MB)
+- `embeddings/` - FAISS indexes per inventory number for both original Dutch and English translations (approximately 200MB, `.index` and `_translated.index` files)
+- `translations/` - AI-generated English translations per inventory (JSON format, not committed to git)
 - `bm25_indices/` - BM25 keyword search indices per inventory number (approximately 5-10MB each, created automatically)
+- `batches/` - Batch translation job files for cost-efficient translation (not committed to git)
 - `results/` - User-generated search results (not committed to git)
 
 On Streamlit Cloud and first local runs, the database and embeddings are automatically downloaded from cloud storage (https://surfdrive.surf.nl/s/8edwicW2DYd8QAB) and cached locally.
@@ -69,17 +74,18 @@ On Streamlit Cloud and first local runs, the database and embeddings are automat
 1. Data preparation: CSV files from `text_input_metadata/` are processed into 300-word chunks with 75-word overlap. Chunks can cross scan boundaries but respect document boundaries (TANAP IDs).
 2. Metadata enrichment: Each chunk is enriched with metadata (year, place, establishment, document category) to enhance search and enable filtering.
 3. Storage: Chunks and metadata are stored in SQLite database (`text-metadata-sqlite/voc_documents.db`).
-4. Embeddings: FAISS indexes are created per inventory number using OpenAI's `text-embedding-3-large` model (3072 dimensions). Metadata is weighted and incorporated into embeddings.
-5. Search: User queries are optionally translated to Dutch, embedded, and matched against FAISS indexes using cosine similarity.
-6. Hybrid search (optional): If enabled, results are enhanced with BM25 (Okapi BM25) keyword matching to improve retrieval of proper names and technical terms:
+4. Translation: Historical Dutch text is translated to modern English using Claude Haiku 4.5 via Anthropic's Batch API with prompt caching (90%+ cost savings). Two versions are stored: detailed (with bracketed annotations for place names, measurements, etc.) and clean (for embeddings).
+5. Embeddings: FAISS indexes are created per inventory number using OpenAI's `text-embedding-3-small` model (1536 dimensions). Separate indexes for original Dutch and English translations enable bilingual search.
+6. Search: User queries are embedded and matched against FAISS indexes using cosine similarity. Users can search in original Dutch or translated English, or compare both side-by-side.
+7. Hybrid search (optional): If enabled, results are enhanced with BM25 (Okapi BM25) keyword matching to improve retrieval of proper names and technical terms:
    - BM25 uses the same weighted metadata (plaats, vestiging, jaar, beschrijving) as embeddings for consistency
    - Query tokens are stemmed (Dutch Snowball stemmer) and filtered to corpus vocabulary to avoid penalty for rare/misspelled terms
    - BM25 scores are max-normalized and scaled to match semantic score range
    - Final score: `(1 - weight) × semantic_score + weight × bm25_scaled`
    - Users control the semantic/keyword balance with an adjustable weight (0.0=pure semantic, 1.0=pure BM25, default 0.3)
    - BM25 scores appear as separate column in results for transparency
-7. Filtering: Results can be filtered by similarity threshold, year range, place, establishment, and document category.
-8. Ranking: Results are ranked by similarity score (or hybrid combined score if BM25 enabled), with options for per-inventory or overall ranking.
+8. Filtering: Results can be filtered by similarity threshold, year range, place, establishment, and document category.
+9. Ranking: Results are ranked by similarity score (or hybrid combined score if BM25 enabled), with options for per-inventory or overall ranking.
 
 ### Usage Modes
 
@@ -100,21 +106,31 @@ Cloud mode (Streamlit Cloud):
 
 Each search query requires:
 
-- Query embedding: 1 call to `text-embedding-3-large` (~$0.00013 per query)
-- Optional translation: 1 call to `gpt-4o-mini` if query is not in Dutch (~$0.0001)
-- Total typical cost: ~$0.0002 per search query
+- Query embedding: 1 call to `text-embedding-3-small` (~$0.00002 per query)
+- Optional translation: 1 call to `gpt-4o-mini` if query needs translation (~$0.0001)
+- Total typical cost: ~$0.00012 per search query
 
 Note: The precomputed embeddings for document chunks are generated once and reused, so they don't incur costs for each query.
+
+Translation costs (one-time per inventory):
+
+- Batch translation with prompt caching: ~$2-3 for 18 inventories (~10,500 chunks)
+- Regular API (for comparison): ~$25-30 for same workload
 
 ## Project Structure
 
 ```
-streamlit_app.py              Main Streamlit UI
+streamlit_app.py              Main Streamlit UI with bilingual search
 app_core.py                   Core logic (chunking, embeddings, search)
+translate_chunks.py           Translate document chunks using Claude Haiku 4.5
+batch_translate.py            Cost-efficient batch translation with prompt caching
+batch_translate_all.py        Batch process all inventories
+import_and_embed.py           Import translations and generate embeddings
 download_data.py              Helper to download and extract precomputed data
 precompute_embeddings.py      Helper to generate all embeddings locally
 requirements.txt              Python dependencies
 DEPLOYMENT.md                 Streamlit Cloud deployment guide
+BATCH_TRANSLATION_GUIDE.md    Guide for batch translation system
 natural-language-search.ipynb Original research notebook
 .streamlit/config.toml        Streamlit configuration
 ```
@@ -127,8 +143,9 @@ The `natural-language-search.ipynb` notebook contains the original exploratory a
 
 ### Models Used
 
-- Embeddings: `text-embedding-3-large` (3072 dimensions, $0.00013 per 1K tokens)
-- Translation: `gpt-4o-mini` (when query is not in Dutch, $0.00015 per 1K input tokens)
+- Embeddings: `text-embedding-3-small` (1536 dimensions, $0.020 per 1M tokens)
+- Translation: `claude-haiku-4-5-20251001` (archaic Dutch to modern English, $0.40/$2.00 per 1M tokens with Batch API + caching)
+- Query translation: `gpt-4o-mini` (when query needs translation, $0.00015 per 1K input tokens)
 
 ### Chunking Strategy
 
@@ -181,6 +198,47 @@ The `natural-language-search.ipynb` notebook contains the original exploratory a
 - Relies on exact token matching; doesn't understand synonyms or related concepts
 - Less effective for paraphrased queries or conceptual search (use semantic search for these)
 
+## Translation System
+
+This project includes a sophisticated translation pipeline for converting archaic Dutch VOC documents (17th-18th century) to modern English:
+
+### Features
+
+- **Specialized VOC translation** using Claude Haiku 4.5 with domain-specific instructions
+- **Batch API with prompt caching** for 90%+ cost savings (typical cost: $2-3 for ~10,000 chunks)
+- **Two translation versions**:
+  - Detailed: includes bracketed annotations `[normalized version: Batavia]`, `[modern equivalent: 100 guilders]`
+  - Clean: annotations removed for embedding generation
+- **Boundary preservation**: prevents chunk merging with explicit marker validation
+- **Preprocessing**: collapses repeated punctuation including Unicode dashes (en-dash, em-dash) from accounting tables
+- **Auto-resume**: saves progress after each batch for interruption recovery
+
+### Translation Quality
+
+The translation prompt includes:
+
+- Historical context for VOC operations in early modern Asia
+- Guidelines for proper names, measurements, technical terms
+- Instructions for handling damaged/illegible text
+- Natural, readable English output (not word-for-word mechanical translation)
+
+### Cost Efficiency
+
+**Batch API + Prompt Caching:**
+
+- First request in batch: $0.40/M tokens (input), $2.00/M tokens (output)
+- Cached requests: $0.02/M tokens (input) - 98% discount on prompt
+- System prompt (~800 tokens) cached across all requests in a batch
+- Total savings: 90-95% compared to regular real-time API
+
+**Example: 18 inventories (~10,500 chunks)**
+
+- Regular API cost: ~$25-30
+- Batch API + caching: ~$2-3
+- Processing time: 2-12 hours (off-peak hours)
+
+For complete documentation, see [BATCH_TRANSLATION_GUIDE.md](BATCH_TRANSLATION_GUIDE.md).
+
 ## Security and Privacy
 
 - API keys: Never committed to git; stored only in browser session memory (Streamlit session state)
@@ -193,10 +251,15 @@ The `natural-language-search.ipynb` notebook contains the original exploratory a
 To add new inventory numbers:
 
 1. Add CSV file to `text_input_metadata/{inv_nr}_metadata.csv` with required columns (see existing files for format)
-2. Run locally: `python precompute_embeddings.py` to generate embeddings
-3. Commit updated `embeddings/` and `text-metadata-sqlite/` directories
-4. Update cloud storage ZIP file with new data
-5. Push to trigger automatic Streamlit Cloud redeployment
+2. Run locally: `python precompute_embeddings.py` to generate original (Dutch) embeddings
+3. Translate chunks: `python batch_translate_all.py submit` for cost-efficient batch translation (see [BATCH_TRANSLATION_GUIDE.md](BATCH_TRANSLATION_GUIDE.md))
+4. Wait for batch completion (2-12 hours), then: `python batch_translate_all.py process-all`
+5. Import and embed: `python import_and_embed.py --all`
+6. Commit updated `embeddings/` and `text-metadata-sqlite/` directories
+7. Update cloud storage ZIP file with new data
+8. Push to trigger automatic Streamlit Cloud redeployment
+
+For detailed translation workflow, see [BATCH_TRANSLATION_GUIDE.md](BATCH_TRANSLATION_GUIDE.md).
 
 ## Methodology
 

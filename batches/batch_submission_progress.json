@@ -1,0 +1,110 @@
+[
+  {
+    "inv_nr": 1267,
+    "batch_id": "msgbatch_017tVJLQUJUS4jN2AaX89SWZ",
+    "batch_file": "batches/batch_1267.jsonl",
+    "submitted_at": "2026-01-30 16:51:30"
+  },
+  {
+    "inv_nr": 1274,
+    "batch_id": "msgbatch_01BpuzFppPyKyBN68wtCr8Kh",
+    "batch_file": "batches/batch_1274.jsonl",
+    "submitted_at": "2026-01-30 16:51:33"
+  },
+  {
+    "inv_nr": 1539,
+    "batch_id": "msgbatch_01YEiYBRNZtsXmDkLpx7gytR",
+    "batch_file": "batches/batch_1539.jsonl",
+    "submitted_at": "2026-01-30 16:51:36"
+  },
+  {
+    "inv_nr": 1547,
+    "batch_id": "msgbatch_01SgjSbMMZGUQruamJgKxz4d",
+    "batch_file": "batches/batch_1547.jsonl",
+    "submitted_at": "2026-01-30 16:51:39"
+  },
+  {
+    "inv_nr": 1557,
+    "batch_id": "msgbatch_011fvjkzhaGs2DGB8aoREkFR",
+    "batch_file": "batches/batch_1557.jsonl",
+    "submitted_at": "2026-01-30 16:51:43"
+  },
+  {
+    "inv_nr": 2448,
+    "batch_id": "msgbatch_01N8JXHjvxWc4HZKvddLPmCy",
+    "batch_file": "batches/batch_2448.jsonl",
+    "submitted_at": "2026-01-30 16:51:46"
+  },
+  {
+    "inv_nr": 2548,
+    "batch_id": "msgbatch_01Ukm4S3D1TA2vodDAQTDSqM",
+    "batch_file": "batches/batch_2548.jsonl",
+    "submitted_at": "2026-01-30 16:51:49"
+  },
+  {
+    "inv_nr": 2555,
+    "batch_id": "msgbatch_0141RiNVYfGyKNYms8q9JfPc",
+    "batch_file": "batches/batch_2555.jsonl",
+    "submitted_at": "2026-01-30 16:51:52"
+  },
+  {
+    "inv_nr": 2775,
+    "batch_id": "msgbatch_01B8hUDZF1qgW8dAzWDaGdRn",
+    "batch_file": "batches/batch_2775.jsonl",
+    "submitted_at": "2026-01-30 16:51:55"
+  },
+  {
+    "inv_nr": 3142,
+    "batch_id": "msgbatch_018b8NWd9S7kn2ATvRfELUVW",
+    "batch_file": "batches/batch_3142.jsonl",
+    "submitted_at": "2026-01-30 16:51:58"
+  },
+  {
+    "inv_nr": 7923,
+    "batch_id": "msgbatch_01AcwMLZPnfQEVCF9B5xpqV2",
+    "batch_file": "batches/batch_7923.jsonl",
+    "submitted_at": "2026-01-30 16:52:01"
+  },
+  {
+    "inv_nr": 8023,
+    "batch_id": "msgbatch_01W6uqEF8ob1MWD5wa5vcMYL",
+    "batch_file": "batches/batch_8023.jsonl",
+    "submitted_at": "2026-01-30 16:52:04"
+  },
+  {
+    "inv_nr": 8121,
+    "batch_id": "msgbatch_0169rGvoCycMn4S6M3anKr15",
+    "batch_file": "batches/batch_8121.jsonl",
+    "submitted_at": "2026-01-30 16:52:07"
+  },
+  {
+    "inv_nr": 8237,
+    "batch_id": "msgbatch_019bv2nXWsTf29tMymVB48VJ",
+    "batch_file": "batches/batch_8237.jsonl",
+    "submitted_at": "2026-01-30 16:52:10"
+  },
+  {
+    "inv_nr": 8276,
+    "batch_id": "msgbatch_01PgEg3Tf9Wp6yt2boNpSTQP",
+    "batch_file": "batches/batch_8276.jsonl",
+    "submitted_at": "2026-01-30 16:52:13"
+  },
+  {
+    "inv_nr": 8284,
+    "batch_id": "msgbatch_012gj9saBXNoiRshwTucNrVZ",
+    "batch_file": "batches/batch_8284.jsonl",
+    "submitted_at": "2026-01-30 16:52:16"
+  },
+  {
+    "inv_nr": 8697,
+    "batch_id": "msgbatch_01CGZcrZw6KH5sNEmXBtyCk3",
+    "batch_file": "batches/batch_8697.jsonl",
+    "submitted_at": "2026-01-30 16:52:18"
+  },
+  {
+    "inv_nr": 8834,
+    "batch_id": "msgbatch_01BF4afoYRFCSufBzNkpjaXR",
+    "batch_file": "batches/batch_8834.jsonl",
+    "submitted_at": "2026-01-30 16:52:21"
+  }
+]
