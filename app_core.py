@@ -31,7 +31,7 @@ EMB_DIR = Path("embeddings")
 BM25_DIR = Path("bm25_indices")
 RESULTS_DIR = Path("results")
 
-EMB_MODEL = "text-embedding-3-large"
+EMB_MODEL = "text-embedding-3-small"  # Changed from 3-large to match translated embeddings (1536 dims)
 CHAT_MODEL = "gpt-4o-mini"
 
 

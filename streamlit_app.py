@@ -97,7 +97,7 @@ with st.expander("ℹ️ About this tool", expanded=st.session_state["about_expa
         - Check "Query in language other than Dutch" to auto-translate queries to Dutch for searching the original corpus
         
         **Search Features:**
-        - **Semantic Search:** OpenAI embeddings (text-embedding-3-large) find conceptually similar documents
+        - **Semantic Search:** OpenAI embeddings (text-embedding-3-small, 1536 dimensions) find conceptually similar documents
         - **Optional Hybrid Search (BM25):** Combine semantic with exact keyword matching (best for names/places)
         - **Advanced Filtering:** Year range, document category, establishment, place
         - **Length-aware Scoring:** Optional boost for longer, more content-rich chunks
