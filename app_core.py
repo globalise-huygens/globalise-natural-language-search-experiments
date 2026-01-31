@@ -31,7 +31,7 @@ EMB_DIR = Path("embeddings")
 BM25_DIR = Path("bm25_indices")
 RESULTS_DIR = Path("results")
 
-EMB_MODEL = "text-embedding-3-small"  # Changed from 3-large to match translated embeddings (1536 dims)
+EMB_MODEL = "text-embedding-3-small"  # 1536 dimensions
 CHAT_MODEL = "gpt-4o-mini"
 
 
@@ -948,13 +948,25 @@ def search_query(
     RESULTS_DIR.mkdir(exist_ok=True)
     client = get_openai_client()
 
-    # Optional translation
-    if translate_if_not_dutch and not is_dutch(query_text):
-        translated_query = translate_to_dutch(client, query_text)
+    # Prepare queries based on search mode
+    # For original (Dutch) mode: translate non-Dutch queries to Dutch
+    # For translated (English) mode: keep English queries as-is
+    is_query_dutch = is_dutch(query_text)
+
+    if translate_if_not_dutch and not is_query_dutch:
+        dutch_query = translate_to_dutch(client, query_text)
+        english_query = query_text
         print(f"🌍 Original query: {query_text}")
-        print(f"🇳🇱 Translated query: {translated_query}")
+        print(f"🇳🇱 Dutch translation: {dutch_query}")
+    elif is_query_dutch:
+        dutch_query = query_text
+        # For Dutch queries, we might need English translation for translated mode
+        # But we'll only translate if actually searching translated embeddings
+        english_query = None
+        print(f"🔎 Query: {query_text}")
     else:
-        translated_query = query_text
+        dutch_query = query_text
+        english_query = query_text
         print(f"🔎 Query: {query_text}")
 
     if use_bm25:
@@ -986,202 +998,232 @@ def search_query(
             if not chunks_inv:
                 continue
 
-        # --- Semantic search (FAISS) ---
-        q_emb = np.array(
-            client.embeddings.create(model=EMB_MODEL, input=translated_query)
-            .data[0]
-            .embedding,
-            dtype="float32",
-        ).reshape(1, -1)
+            # --- Semantic search (FAISS) ---
+            # Use appropriate query language based on search mode
+            if search_mode == "translated":
+                # For translated (English) embeddings, use English query
+                if english_query is None:
+                    # Dutch query needs to be translated to English
+                    from anthropic import Anthropic
 
-        k = (
-            len(chunks_inv)
-            if top_k is None
-            else min(top_k, len(chunks_inv), faiss_idx.ntotal)
-        )
-        D, I = faiss_idx.search(q_emb, k)
-        semantic_scores = 1.0 / (1.0 + D.flatten())
-        I = I.flatten()
+                    anthropic_client = Anthropic()
+                    response = anthropic_client.messages.create(
+                        model="claude-haiku-4-5-20251001",
+                        max_tokens=500,
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": f"Translate this Dutch text to English. Only provide the translation, no explanation:\n\n{dutch_query}",
+                            }
+                        ],
+                    )
+                    english_query = response.content[0].text.strip()
+                    print(f"🇬🇧 English translation: {english_query}")
+                query_for_embedding = english_query
+            else:
+                # For original (Dutch) embeddings, use Dutch query
+                query_for_embedding = dutch_query
 
-        # --- BM25 search (if enabled) ---
-        final_scores = semantic_scores.copy()
-        bm25_scores_arr = None
+            q_emb = np.array(
+                client.embeddings.create(model=EMB_MODEL, input=query_for_embedding)
+                .data[0]
+                .embedding,
+                dtype="float32",
+            ).reshape(1, -1)
 
-        if use_bm25:
-            try:
-                bm25_idx, bm25_texts = create_or_load_bm25_index(inv)
-                # Tokenize query with same preprocessing and stemming
-                import string
+            k = (
+                len(chunks_inv)
+                if top_k is None
+                else min(top_k, len(chunks_inv), faiss_idx.ntotal)
+            )
+            D, I = faiss_idx.search(q_emb, k)
+            semantic_scores = 1.0 / (1.0 + D.flatten())
+            I = I.flatten()
+            # --- BM25 search (if enabled) ---
+            final_scores = semantic_scores.copy()
+            bm25_scores_arr = None
 
-                stemmer = SnowballStemmer("dutch")
+            if use_bm25:
+                try:
+                    bm25_idx, bm25_texts = create_or_load_bm25_index(inv)
+                    # Tokenize query with same preprocessing and stemming
+                    import string
 
-                stop_words = {
-                    "de",
-                    "het",
-                    "een",
-                    "en",
-                    "van",
-                    "op",
-                    "in",
-                    "is",
-                    "dat",
-                    "met",
-                    "voor",
-                    "aan",
-                    "om",
-                    "te",
-                    "er",
-                    "niet",
-                    "als",
-                    "uit",
-                    "daar",
-                    "wat",
-                    "wie",
-                    "welke",
-                    "deze",
-                    "die",
-                    "wij",
-                    "ik",
-                    "je",
-                    "hij",
-                    "zij",
-                    "zich",
-                    "hun",
-                    "mij",
-                    "me",
-                    "jou",
-                    "u",
-                    "ma",
-                    "pa",
-                    "ja",
-                    "nee",
-                    "ook",
-                    "nog",
-                    "heel",
-                    "very",
-                    "this",
-                    "that",
-                    "be",
-                    "have",
-                }
+                    stemmer = SnowballStemmer("dutch")
 
-                # Apply same tokenization as in index creation
-                query_text = translated_query.translate(
-                    str.maketrans("", "", string.punctuation)
-                ).lower()
-                query_tokens = []
-                for word in query_text.split():
-                    if len(word) > 2 and word not in stop_words:
-                        query_tokens.append(stemmer.stem(word))
+                    stop_words = {
+                        "de",
+                        "het",
+                        "een",
+                        "en",
+                        "van",
+                        "op",
+                        "in",
+                        "is",
+                        "dat",
+                        "met",
+                        "voor",
+                        "aan",
+                        "om",
+                        "te",
+                        "er",
+                        "niet",
+                        "als",
+                        "uit",
+                        "daar",
+                        "wat",
+                        "wie",
+                        "welke",
+                        "deze",
+                        "die",
+                        "wij",
+                        "ik",
+                        "je",
+                        "hij",
+                        "zij",
+                        "zich",
+                        "hun",
+                        "mij",
+                        "me",
+                        "jou",
+                        "u",
+                        "ma",
+                        "pa",
+                        "ja",
+                        "nee",
+                        "ook",
+                        "nog",
+                        "heel",
+                        "very",
+                        "this",
+                        "that",
+                        "be",
+                        "have",
+                    }
 
-                if query_tokens:  # Only proceed if there are meaningful tokens
-                    # Filter query tokens to only those present in the corpus vocabulary
-                    all_corpus_tokens = set()
-                    with sqlite3.connect(DB_PATH) as conn:
-                        df_corpus = pd.read_sql_query(
-                            "SELECT text FROM documents WHERE inv_nr=?",
-                            conn,
-                            params=(inv,),
-                        )
+                    # Apply same tokenization as in index creation
+                    # Use the appropriate query for BM25 (should match the corpus language)
+                    bm25_query_text = query_for_embedding.translate(
+                        str.maketrans("", "", string.punctuation)
+                    ).lower()
+                    query_tokens = []
+                    for word in bm25_query_text.split():
+                        if len(word) > 2 and word not in stop_words:
+                            query_tokens.append(stemmer.stem(word))
 
-                    for text in df_corpus["text"].fillna("").astype(str):
-                        text = text.translate(
-                            str.maketrans("", "", string.punctuation)
-                        ).lower()
-                        for word in text.split():
-                            if len(word) > 2 and word not in stop_words:
-                                all_corpus_tokens.add(stemmer.stem(word))
+                    if query_tokens:  # Only proceed if there are meaningful tokens
+                        # Filter query tokens to only those present in the corpus vocabulary
+                        all_corpus_tokens = set()
+                        with sqlite3.connect(DB_PATH) as conn:
+                            df_corpus = pd.read_sql_query(
+                                "SELECT text FROM documents WHERE inv_nr=?",
+                                conn,
+                                params=(inv,),
+                            )
 
-                    filtered_query_tokens = [
-                        t for t in query_tokens if t in all_corpus_tokens
-                    ]
+                        for text in df_corpus["text"].fillna("").astype(str):
+                            text = text.translate(
+                                str.maketrans("", "", string.punctuation)
+                            ).lower()
+                            for word in text.split():
+                                if len(word) > 2 and word not in stop_words:
+                                    all_corpus_tokens.add(stemmer.stem(word))
 
-                    # If nothing matches the corpus vocabulary, keep BM25 neutral but present
-                    if not filtered_query_tokens:
-                        bm25_scores_topk = np.zeros_like(I, dtype=float)
-                    else:
-                        # Get BM25 scores for all documents
-                        bm25_doc_scores = bm25_idx.get_scores(filtered_query_tokens)
+                        filtered_query_tokens = [
+                            t for t in query_tokens if t in all_corpus_tokens
+                        ]
 
-                        # Get BM25 scores for the top-k semantic results
-                        bm25_scores_topk = bm25_doc_scores[I]
-
-                    # Normalize BM25 scores relative to their max (keep zeros if unmatched)
-                    if len(bm25_scores_topk) > 0:
-                        bm25_max = bm25_scores_topk.max()
-                        if bm25_max > 0:
-                            bm25_scores_arr = bm25_scores_topk / bm25_max
+                        # If nothing matches the corpus vocabulary, keep BM25 neutral but present
+                        if not filtered_query_tokens:
+                            bm25_scores_topk = np.zeros_like(I, dtype=float)
                         else:
-                            bm25_scores_arr = np.zeros_like(bm25_scores_topk)
+                            # Get BM25 scores for all documents
+                            bm25_doc_scores = bm25_idx.get_scores(filtered_query_tokens)
 
-                        # Scale BM25 contribution to semantic score scale for clearer interpretations
-                        sem_max = semantic_scores.max()
-                        bm25_scaled = bm25_scores_arr * sem_max
+                            # Get BM25 scores for the top-k semantic results
+                            bm25_scores_topk = bm25_doc_scores[I]
 
-                        # Weighted blend without forcing scores to 1.0
-                        final_scores = ((1 - bm25_weight) * semantic_scores) + (
-                            bm25_weight * bm25_scaled
-                        )
-            except Exception as e:
-                print(f"⚠️ BM25 search failed for {inv}: {e}")
-                # Fall back to semantic-only scores
+                        # Normalize BM25 scores relative to their max (keep zeros if unmatched)
+                        if len(bm25_scores_topk) > 0:
+                            bm25_max = bm25_scores_topk.max()
+                            if bm25_max > 0:
+                                bm25_scores_arr = bm25_scores_topk / bm25_max
+                            else:
+                                bm25_scores_arr = np.zeros_like(bm25_scores_topk)
 
-        with sqlite3.connect(DB_PATH) as conn:
-            # Select appropriate text column based on search mode
-            text_column = (
-                "text_translated_clean" if search_mode == "translated" else "text"
+                            # Scale BM25 contribution to semantic score scale for clearer interpretations
+                            sem_max = semantic_scores.max()
+                            bm25_scaled = bm25_scores_arr * sem_max
+
+                            # Weighted blend without forcing scores to 1.0
+                            final_scores = ((1 - bm25_weight) * semantic_scores) + (
+                                bm25_weight * bm25_scaled
+                            )
+                except Exception as e:
+                    print(f"⚠️ BM25 search failed for {inv}: {e}")
+                    # Fall back to semantic-only scores
+
+            with sqlite3.connect(DB_PATH) as conn:
+                # Select appropriate text column based on search mode for similarity calculation
+                # but always include both original and translated text for display
+                text_column = (
+                    "text_translated_clean" if search_mode == "translated" else "text"
+                )
+                df_meta = pd.read_sql_query(
+                    f"""SELECT inv_nr, tanap_id, start_page, pages, chunk_id, datum, 
+                        plaats, vestiging, beschrijving, doc_category, 
+                        text, text_translated_detailed, 
+                        {text_column} as text_for_similarity 
+                        FROM documents WHERE inv_nr=? ORDER BY chunk_id""",
+                    conn,
+                    params=(inv,),
+                )
+
+            valid_mask = I < len(df_meta)
+            I = I[valid_mask]
+            semantic_scores = semantic_scores[valid_mask]
+            final_scores = final_scores[valid_mask]
+            if bm25_scores_arr is not None:
+                bm25_scores_arr = bm25_scores_arr[valid_mask]
+
+            if len(I) == 0:
+                continue
+
+            # Sort by final scores and apply top_k
+            sort_idx = np.argsort(-final_scores)
+            if top_k is not None:
+                sort_idx = sort_idx[:top_k]
+            I = I[sort_idx]
+            semantic_scores = semantic_scores[sort_idx]
+            final_scores = final_scores[sort_idx]
+            if bm25_scores_arr is not None:
+                bm25_scores_arr = bm25_scores_arr[sort_idx]
+
+            df_res = df_meta.iloc[I].copy()
+            df_res["similarity"] = final_scores
+            df_res["semantic_score"] = semantic_scores
+            if bm25_scores_arr is not None:
+                df_res["bm25_score"] = bm25_scores_arr
+
+            # Add search mode source when doing comparison
+            if mode == "both":
+                df_res["search_source"] = search_mode
+
+            # Extract year for filtering (done here so it's available in results)
+            df_res["jaar"] = df_res["datum"].str.extract(r"(\d{4})")[0].fillna("")
+            df_res["jaar_int"] = pd.to_numeric(df_res["jaar"], errors="coerce")
+
+            # Add transcription URL
+            df_res["transcription_url"] = df_res["start_page"].apply(
+                build_transcription_url
             )
-            df_meta = pd.read_sql_query(
-                f"SELECT inv_nr, tanap_id, start_page, pages, chunk_id, datum, plaats, vestiging, beschrijving, doc_category, {text_column} as text FROM documents WHERE inv_nr=? ORDER BY chunk_id",
-                conn,
-                params=(inv,),
-            )
 
-        valid_mask = I < len(df_meta)
-        I = I[valid_mask]
-        semantic_scores = semantic_scores[valid_mask]
-        final_scores = final_scores[valid_mask]
-        if bm25_scores_arr is not None:
-            bm25_scores_arr = bm25_scores_arr[valid_mask]
+            # Save per-inv CSV
+            out_file = RESULTS_DIR / f"{safe_filename_from_query(query_text)}-{inv}.csv"
+            df_res.to_csv(out_file, index=False)
+            print(f"💾 Results saved to: {out_file}")
 
-        if len(I) == 0:
-            continue
-
-        # Sort by final scores and apply top_k
-        sort_idx = np.argsort(-final_scores)
-        if top_k is not None:
-            sort_idx = sort_idx[:top_k]
-        I = I[sort_idx]
-        semantic_scores = semantic_scores[sort_idx]
-        final_scores = final_scores[sort_idx]
-        if bm25_scores_arr is not None:
-            bm25_scores_arr = bm25_scores_arr[sort_idx]
-
-        df_res = df_meta.iloc[I].copy()
-        df_res["similarity"] = final_scores
-        df_res["semantic_score"] = semantic_scores
-        if bm25_scores_arr is not None:
-            df_res["bm25_score"] = bm25_scores_arr
-
-        # Add search mode source when doing comparison
-        if mode == "both":
-            df_res["search_source"] = search_mode
-
-        # Extract year for filtering (done here so it's available in results)
-        df_res["jaar"] = df_res["datum"].str.extract(r"(\d{4})")[0].fillna("")
-        df_res["jaar_int"] = pd.to_numeric(df_res["jaar"], errors="coerce")
-
-        # Add transcription URL
-        df_res["transcription_url"] = df_res["start_page"].apply(
-            build_transcription_url
-        )
-
-        # Save per-inv CSV
-        out_file = RESULTS_DIR / f"{safe_filename_from_query(query_text)}-{inv}.csv"
-        df_res.to_csv(out_file, index=False)
-        print(f"💾 Results saved to: {out_file}")
-
-        all_results.append(df_res)
+            all_results.append(df_res)
 
     if all_results:
         df_all = pd.concat(all_results, ignore_index=True)
@@ -1206,7 +1248,7 @@ def search_query(
             columns.append("bm25_score")
         if "search_source" in df_all.columns:
             columns.append("search_source")
-        columns.extend(["transcription_url", "text"])
+        columns.extend(["transcription_url", "text", "text_translated_detailed"])
         return df_all[columns]
 
     # Return empty DataFrame with appropriate columns
@@ -1227,6 +1269,7 @@ def search_query(
         "semantic_score",
         "transcription_url",
         "text",
+        "text_translated_detailed",
     ]
     if use_bm25:
         columns.insert(columns.index("transcription_url"), "bm25_score")

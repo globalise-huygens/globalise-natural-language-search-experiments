@@ -958,6 +958,10 @@ if (
                     "similarity",
                 ]
 
+                # Add search_source if available (for comparison mode)
+                if "search_source" in df_display.columns:
+                    base_columns.append("search_source")
+
                 # Add score columns if available
                 if "semantic_score" in df_display.columns:
                     base_columns.append("semantic_score")
@@ -983,6 +987,7 @@ if (
                         "pages",
                         "transcription_url",
                         "text",
+                        "text_translated_detailed",
                     ]
                 )
 

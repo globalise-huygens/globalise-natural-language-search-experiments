@@ -75,7 +75,7 @@ On Streamlit Cloud and first local runs, the database and embeddings are automat
 2. Metadata enrichment: Each chunk is enriched with metadata (year, place, establishment, document category) to enhance search and enable filtering.
 3. Storage: Chunks and metadata are stored in SQLite database (`text-metadata-sqlite/voc_documents.db`).
 4. Translation: Historical Dutch text is translated to modern English using Claude Haiku 4.5 via Anthropic's Batch API with prompt caching (90%+ cost savings). Two versions are stored: detailed (with bracketed annotations for place names, measurements, etc.) and clean (for embeddings).
-5. Embeddings: FAISS indexes are created per inventory number using OpenAI's `text-embedding-3-small` model (1536 dimensions). The same model is used for both original Dutch and English translations, ensuring consistent semantic space and optimal cost/performance balance for modern translated text.
+5. Embeddings: FAISS indexes are created per inventory number using OpenAI's `text-embedding-3-small` model (1536 dimensions). The same model is used for both original Dutch and English translations, ensuring consistent semantic space and optimal cost/performance balance.
 6. Search: User queries are embedded and matched against FAISS indexes using cosine similarity. Users can search in original Dutch or translated English, or compare both side-by-side.
 7. Hybrid search (optional): If enabled, results are enhanced with BM25 (Okapi BM25) keyword matching to improve retrieval of proper names and technical terms:
    - BM25 uses the same weighted metadata (plaats, vestiging, jaar, beschrijving) as embeddings for consistency
