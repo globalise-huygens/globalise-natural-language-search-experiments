@@ -236,7 +236,7 @@ __pycache__/
 text_input/
 text_input_metadata/
 # embeddings/*.index  # COMMENTED OUT - embeddings ARE committed for Streamlit Cloud
-text-metadata-sqlite/*.db
+# text-metadata-sqlite/*.db  # COMMENTED OUT - database IS committed for Streamlit Cloud
 
 # Jupyter
 .ipynb_checkpoints/
