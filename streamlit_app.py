@@ -247,48 +247,10 @@ with st.sidebar:
 
     # ===== 6. DATABASE OPTIONS =====
     st.markdown("---")
-    st.subheader("🔧 Database options (local only)")
-
-    # Only allow DB rebuild in local development (not on Streamlit Cloud)
-    is_cloud = os.getenv("STREAMLIT_SHARING_MODE") or os.getenv("STREAMLIT_CLOUD")
-
-    if is_cloud:
-        # In cloud: show info message only, no controls
-        st.info(
-            "📌 Database and embeddings are pre-computed. Database rebuild options are only available when running locally."
-        )
-        build_db = False
-        apply_norm = True
-        chunk_size = 300
-        overlap = 75
-    else:
-        # Local development: show interactive controls
-        build_db = st.checkbox(
-            "Rebuild database",
-            value=False,
-            help="Reads all CSVs and reconstructs chunks.",
-        )
-        apply_norm = st.checkbox(
-            "Normalize spelling", value=False, help="Apply text normalization."
-        )
-        chunk_size = st.number_input(
-            "Chunk size (words)",
-            min_value=100,
-            max_value=2000,
-            value=300,
-            step=50,
-            help="Number of words per chunk.",
-        )
-        overlap = st.number_input(
-            "Overlap (words)",
-            min_value=0,
-            max_value=500,
-            value=75,
-            step=10,
-            help="Word overlap between chunks.",
-        )
-
-    st.markdown("---")
+    st.subheader("� Data")
+    st.info(
+        "📌 Database and embeddings are pre-computed. Chunk size: 300 words with 75-word overlap."
+    )
     st.caption("Database: text-metadata-sqlite/voc_documents.db")
     st.caption("Embeddings: embeddings/")
     st.caption("BM25 indices: bm25_indices/")
@@ -319,24 +281,6 @@ with st.form(key="search_form"):
 
 # Use the session state API key
 api_key = st.session_state.api_key
-
-if build_db:
-    if not api_key:
-        st.error(
-            "API key required for building database (for potential embedding generation later)."
-        )
-    else:
-        with st.spinner("Building database from CSVs..."):
-            try:
-                total = ensure_database_from_text_inputs(
-                    apply_normalization=apply_norm,
-                    chunk_size=chunk_size,
-                    overlap=overlap,
-                )
-                st.success(f"Database built with {total} chunks.")
-            except Exception as e:
-                st.error(f"Error building database: {e}")
-                st.code(traceback.format_exc())
 
 # Process search
 if run_search:
