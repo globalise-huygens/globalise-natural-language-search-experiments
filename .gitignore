@@ -235,7 +235,7 @@ __pycache__/
 # Data files (don't commit these - too large)
 text_input/
 text_input_metadata/
-embeddings/*.index
+# embeddings/*.index  # COMMENTED OUT - embeddings ARE committed for Streamlit Cloud
 text-metadata-sqlite/*.db
 
 # Jupyter
