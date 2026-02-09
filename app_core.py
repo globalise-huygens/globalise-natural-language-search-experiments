@@ -823,8 +823,16 @@ def load_or_create_embeddings(
 
     emb_file = _embeddings_file(inv_nr, mode=mode)
     if use_cache and emb_file.exists():
-        faiss_idx = faiss.read_index(str(emb_file))
-        return faiss_idx, chunks_inv
+        try:
+            faiss_idx = faiss.read_index(str(emb_file))
+            print(
+                f"📂 Loaded FAISS index for {inv_nr} ({mode}): "
+                f"{faiss_idx.ntotal} vectors, {faiss_idx.d} dimensions"
+            )
+            return faiss_idx, chunks_inv
+        except Exception as e:
+            print(f"❌ Error loading FAISS index from {emb_file}: {e}")
+            raise
 
     # Check if running on Streamlit Cloud
     is_cloud = os.getenv("STREAMLIT_SHARING_MODE") or os.getenv("STREAMLIT_CLOUD")
@@ -841,7 +849,11 @@ def load_or_create_embeddings(
     for i in tqdm(range(0, len(chunks_inv), batch_size)):
         batch = chunks_inv[i : i + batch_size]
         try:
-            resp = client.embeddings.create(model=EMB_MODEL, input=batch)
+            resp = client.embeddings.create(
+                model=EMB_MODEL, 
+                input=batch,
+                dimensions=1536  # Explicitly specify dimensions
+            )
             batch_embeddings = [
                 r.embedding for r in resp.data if hasattr(r, "embedding")
             ]
@@ -1025,11 +1037,25 @@ def search_query(
                 query_for_embedding = dutch_query
 
             q_emb = np.array(
-                client.embeddings.create(model=EMB_MODEL, input=query_for_embedding)
+                client.embeddings.create(
+                    model=EMB_MODEL, 
+                    input=query_for_embedding,
+                    dimensions=1536  # Explicitly specify dimensions
+                )
                 .data[0]
                 .embedding,
                 dtype="float32",
             ).reshape(1, -1)
+
+            # Validate dimensions match
+            if q_emb.shape[1] != faiss_idx.d:
+                raise ValueError(
+                    f"Dimension mismatch: query embedding has {q_emb.shape[1]} dimensions "
+                    f"but FAISS index expects {faiss_idx.d} dimensions. "
+                    f"The index was likely created with a different embedding model. "
+                    f"Current model: {EMB_MODEL}. "
+                    f"Please regenerate the embeddings for inventory {inv_nr} in {mode} mode."
+                )
 
             k = (
                 len(chunks_inv)
