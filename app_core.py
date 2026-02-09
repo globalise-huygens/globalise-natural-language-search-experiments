@@ -850,9 +850,9 @@ def load_or_create_embeddings(
         batch = chunks_inv[i : i + batch_size]
         try:
             resp = client.embeddings.create(
-                model=EMB_MODEL, 
+                model=EMB_MODEL,
                 input=batch,
-                dimensions=1536  # Explicitly specify dimensions
+                dimensions=1536,  # Explicitly specify dimensions
             )
             batch_embeddings = [
                 r.embedding for r in resp.data if hasattr(r, "embedding")
@@ -1038,9 +1038,9 @@ def search_query(
 
             q_emb = np.array(
                 client.embeddings.create(
-                    model=EMB_MODEL, 
+                    model=EMB_MODEL,
                     input=query_for_embedding,
-                    dimensions=1536  # Explicitly specify dimensions
+                    dimensions=1536,  # Explicitly specify dimensions
                 )
                 .data[0]
                 .embedding,
@@ -1054,7 +1054,7 @@ def search_query(
                     f"but FAISS index expects {faiss_idx.d} dimensions. "
                     f"The index was likely created with a different embedding model. "
                     f"Current model: {EMB_MODEL}. "
-                    f"Please regenerate the embeddings for inventory {inv_nr} in {mode} mode."
+                    f"Please regenerate the embeddings for inventory {inv} in {search_mode} mode."
                 )
 
             k = (
